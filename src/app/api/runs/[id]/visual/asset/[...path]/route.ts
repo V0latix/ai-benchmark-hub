@@ -1,7 +1,7 @@
 import { SafeGitHubReader } from "../../../../../../../lib/github/client";
 import { benchmarkSources } from "../../../../../../../lib/sources/config";
 import { getRunById } from "../../../../../../../lib/storage/queries";
-import { transformPreviewModule, transformPreviewStylesheet } from "../../../../../../../lib/visuals/module";
+import { compilePreviewStylesheet, extractTailwindCandidates, transformPreviewModule, transformPreviewStylesheet } from "../../../../../../../lib/visuals/module";
 import { getRunVisual } from "../../../../../../../components/run-visual";
 import { interactivePreviewCorsHeaders } from "../../../../../../../lib/visuals/preview";
 
@@ -19,8 +19,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   for (const candidate of candidates(requested)) {
     for (const filePath of [`${directory}/${candidate}`, `${directory}/public/${candidate}`]) {
       try {
-        const text = await reader.readText(artifactSource, filePath); const isModule = /\.[cm]?[jt]sx?$/i.test(filePath);
-        return new Response(isModule ? transformPreviewModule(text, filePath) : filePath.endsWith(".css") ? transformPreviewStylesheet(text) : text, { headers: { "Content-Type": isModule ? "text/javascript; charset=utf-8" : filePath.endsWith(".css") ? "text/css; charset=utf-8" : "image/svg+xml", "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } });
+        const text = await reader.readText(artifactSource, filePath);
+        const isModule = /\.[cm]?[jt]sx?$/i.test(filePath); const isStylesheet = filePath.endsWith(".css");
+        try {
+          const sourceFiles = isStylesheet ? await reader.listFiles(artifactSource) : []; const sourceTexts = isStylesheet ? await Promise.all(sourceFiles.filter((path) => /\.[cm]?[jt]sx?$/i.test(path)).map((path) => reader.readText(artifactSource, path).catch(() => ""))) : [];
+          const body = isModule ? transformPreviewModule(text, filePath) : isStylesheet && /@import\s+["']tailwindcss["']/i.test(text) ? await compilePreviewStylesheet(text, extractTailwindCandidates(sourceTexts.join("\n"))) : isStylesheet ? transformPreviewStylesheet(text) : text;
+          return new Response(body, { headers: { "Content-Type": isModule ? "text/javascript; charset=utf-8" : isStylesheet ? "text/css; charset=utf-8" : "image/svg+xml", "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } });
+        } catch (error) { return new Response(error instanceof Error ? error.message : "Asset transform failed", { status: 500 }); }
       } catch { /* Try the next safe extension or public-file location. */ }
     }
   }
