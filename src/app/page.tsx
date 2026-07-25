@@ -1,0 +1,4 @@
+import { MetricCard } from "../components/metric-card";
+import { getDashboardMetrics } from "../lib/storage/queries";
+export const dynamic = "force-dynamic";
+export default async function HomePage() { const metrics = await getDashboardMetrics(); return <section><h1 className="text-3xl font-semibold text-white">Overview</h1><div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><MetricCard label="Parsed runs" value={metrics.runs}/><MetricCard label="Active sources" value={metrics.sources}/><MetricCard label="Known total cost" value={metrics.cost ? `$${metrics.cost.toFixed(2)}` : null}/><MetricCard label="Unique models" value={metrics.models}/><MetricCard label="Unique tasks" value={metrics.tasks}/><MetricCard label="Last sync" value={metrics.syncedAt ? new Date(metrics.syncedAt).toLocaleString() : null}/></div></section>; }

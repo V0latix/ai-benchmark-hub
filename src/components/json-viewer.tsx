@@ -1,0 +1,1 @@
+export function JsonViewer({ value }: { value: unknown }) { return <details className="rounded border border-slate-800 p-3"><summary className="cursor-pointer text-sm font-medium">Raw JSON</summary><pre className="mt-3 overflow-auto text-xs text-slate-300">{JSON.stringify(value, null, 2)}</pre></details>; }

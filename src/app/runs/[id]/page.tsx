@@ -1,0 +1,7 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { JsonViewer } from "../../../components/json-viewer";
+import { benchmarkSources } from "../../../lib/sources/config";
+import { getRunById } from "../../../lib/storage/queries";
+export const dynamic = "force-dynamic";
+export default async function RunPage({ params }: { params: Promise<{ id: string }> }) { const run = await getRunById((await params).id); if (!run) notFound(); const branch = benchmarkSources.find((source) => source.id === run.sourceId)?.branch ?? "main"; const links = [["Prompt", run.promptPath], ["Transcript", run.transcriptPath], ["Result", run.resultPath], ["Evidence", run.evidencePath], ["Screenshot", run.screenshotPath], ["Preview", run.previewPath]].filter(([, path]) => path); return <section><h1 className="text-3xl font-semibold text-white">{run.model ?? "Unknown model"}</h1><dl className="mt-6 grid gap-3 sm:grid-cols-2">{Object.entries({ Source: run.sourceId, Task: run.task, Status: run.status, Score: run.score, Cost: run.totalCostUsd, Tokens: run.totalTokens, Duration: run.durationMs, Created: run.createdAt }).map(([label, value]) => <div className="rounded border border-slate-800 p-3" key={label}><dt className="text-sm text-slate-400">{label}</dt><dd>{value ?? "—"}</dd></div>)}</dl><div className="my-6 flex flex-wrap gap-3">{links.map(([label, path]) => <Link className="text-sky-300" key={label} href={`https://github.com/${run.sourceRepo}/blob/${branch}/${path}`}>{label}</Link>)}</div><JsonViewer value={run.raw}/></section>; }
