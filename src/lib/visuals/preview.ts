@@ -16,6 +16,11 @@ export function getPreviewAssetBaseUrl(runId: string): string {
   return `/api/runs/${encodeURIComponent(runId)}/visual/asset`;
 }
 
+export function getPreviewVendorUrl(assetBaseUrl: string, modulePath: string): string {
+  const vendorBaseUrl = assetBaseUrl.replace(/\/asset$/, "/vendor");
+  return `${vendorBaseUrl}/${modulePath.split("/").map((segment) => encodeURIComponent(segment).replace(/%40/gi, "@")).join("/")}`;
+}
+
 export function getPreviewAssetUrl(runId: string, path: string): string {
   return `${getPreviewAssetBaseUrl(runId)}/${path.split("/").map(encodeURIComponent).join("/")}?preview=${previewAssetVersion}`;
 }
@@ -42,7 +47,10 @@ function previewStorageShim(): string {
 }
 
 export function injectInteractivePreview(html: string, assetBaseUrl: string, dependencies: Record<string, string>): string {
-  const imports = Object.fromEntries(Object.entries(dependencies).flatMap(([name, version]) => [[name, `https://esm.sh/${name}@${version}`], [`${name}/`, `https://esm.sh/${name}@${version}/`]]));
+  const imports = Object.fromEntries(Object.entries(dependencies).flatMap(([name, version]) => {
+    const packagePath = `${name}@${version}`;
+    return [[name, getPreviewVendorUrl(assetBaseUrl, packagePath)], [`${name}/`, `${getPreviewVendorUrl(assetBaseUrl, packagePath)}/`]];
+  }));
   const entry = `${assetBaseUrl}/src/main.tsx?preview=${previewAssetVersion}`;
   const withoutViteEntry = html.replace(/<script\b[^>]*\bsrc=["']\/src\/[^"']+["'][^>]*><\/script>/i, "");
   const rewrittenRoots = rewritePreviewRootUrls(withoutViteEntry, assetBaseUrl);
