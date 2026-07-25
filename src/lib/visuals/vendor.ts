@@ -9,10 +9,10 @@ function vendorSpecifier(specifier: string, vendorBaseUrl: string): string {
 }
 
 export function rewriteEsmModuleImports(source: string, vendorBaseUrl: string): string {
-  const staticImport = /\b(import|export)\s+((?:[^"']*?\s+from\s+)?)(["'])(\/(?!\/)[^"']+|https:\/\/esm\.sh\/[^"']+)\3/g;
+  const staticImport = /\b((?:import|export)(?:[^;"']*?\bfrom)?\s*)(["'])(\/(?!\/)[^"']+|https:\/\/esm\.sh\/[^"']+)\2/g;
   const dynamicImport = /\bimport\(\s*(["'])(\/(?!\/)[^"']+|https:\/\/esm\.sh\/[^"']+)\1\s*\)/g;
   return source
-    .replace(staticImport, (_match, statement, clause, quote, specifier) => `${statement} ${clause}${quote}${vendorSpecifier(specifier, vendorBaseUrl)}${quote}`)
+    .replace(staticImport, (_match, prefix, quote, specifier) => `${prefix}${quote}${vendorSpecifier(specifier, vendorBaseUrl)}${quote}`)
     .replace(dynamicImport, (_match, quote, specifier) => `import(${quote}${vendorSpecifier(specifier, vendorBaseUrl)}${quote})`);
 }
 
