@@ -2,7 +2,7 @@ import { getRunVisual } from "../../../../../components/run-visual";
 import { SafeGitHubReader } from "../../../../../lib/github/client";
 import { benchmarkSources } from "../../../../../lib/sources/config";
 import { getRunById } from "../../../../../lib/storage/queries";
-import { getPreviewAssetBaseUrl, injectInteractivePreview, interactivePreviewCsp } from "../../../../../lib/visuals/preview";
+import { getPreviewAssetBaseUrl, injectInteractivePreview, injectStandalonePreview, interactivePreviewCsp } from "../../../../../lib/visuals/preview";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const run = await getRunById((await params).id);
@@ -14,9 +14,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   try {
     const html = await new SafeGitHubReader().readText(source, visual.path);
     const artifactDirectory = visual.path.split("/").slice(0, -1).join("/");
-    const artifactSource = { ...source, allowlist: [`${artifactDirectory}/package.json`] };
-    const manifest = JSON.parse(await new SafeGitHubReader().readText(artifactSource, `${artifactDirectory}/package.json`)) as { dependencies?: Record<string, string> };
-    return new Response(injectInteractivePreview(html, getPreviewAssetBaseUrl(run.id), manifest.dependencies ?? {}), {
+    const assetBaseUrl = getPreviewAssetBaseUrl(run.id);
+    const isVitePreview = /<script\b[^>]*\bsrc=["']\/src\/[^"']+["'][^>]*><\/script>/i.test(html);
+    let previewHtml = injectStandalonePreview(html, assetBaseUrl);
+    if (isVitePreview) {
+      const artifactSource = { ...source, allowlist: [`${artifactDirectory}/package.json`] };
+      const manifest = JSON.parse(await new SafeGitHubReader().readText(artifactSource, `${artifactDirectory}/package.json`)) as { dependencies?: Record<string, string> };
+      previewHtml = injectInteractivePreview(html, assetBaseUrl, manifest.dependencies ?? {});
+    }
+    return new Response(previewHtml, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Content-Security-Policy": interactivePreviewCsp,
