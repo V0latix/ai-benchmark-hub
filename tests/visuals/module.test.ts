@@ -17,6 +17,20 @@ describe("preview module transform", () => {
     expect(code).not.toContain("from './assets/hero.png'");
   });
 
+  it("resolves Vite @ aliases relative to the proxied source module", () => {
+    const code = transformPreviewModule('import { cn } from "@/lib/utils"; export const Button = () => <button className={cn("a")} />;', "src/components/ui/button.tsx");
+
+    expect(code).toContain('from "../../lib/utils"');
+    expect(code).not.toContain('from "@/lib/utils"');
+  });
+
+  it("resolves @ aliases when the proxy passes the full GitHub artifact path", () => {
+    const code = transformPreviewModule('import { cn } from "@/lib/utils"; export const Button = () => <button className={cn("a")} />;', "benchmarks/gmail-clone/run/src/components/ui/button.tsx");
+
+    expect(code).toContain('from "../../lib/utils"');
+    expect(code).not.toContain("../../../../../../src/lib/utils");
+  });
+
   it("removes the Vite-only Tailwind import from a stylesheet", () => {
     expect(transformPreviewStylesheet('@import "tailwindcss";\n:root { color: red; }')).toBe(':root { color: red; }');
   });
