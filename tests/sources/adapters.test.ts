@@ -47,4 +47,11 @@ describe("source adapters", () => {
     const result = await getAdapter("tinybird")({ ...tinybird, files: [], reader: { listFiles: async () => [], readText: async () => { throw new Error("not found"); } } });
     expect(result).toEqual({ runs: [], warnings: ["No Tinybird results file found"] });
   });
+
+  it("skips an empty Melvynx metadata file while keeping valid runs", async () => {
+    const melvynx = context("melvynx-benchmarks");
+    const result = await getAdapter("melvynx")({ ...melvynx, files: ["runs/demo/data/metadata.json", "runs/empty/data/metadata.json"] });
+    expect(result.runs).toHaveLength(1);
+    expect(result.warnings).toEqual(["Skipped invalid JSON: runs/empty/data/metadata.json"]);
+  });
 });

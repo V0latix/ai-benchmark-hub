@@ -14,7 +14,8 @@ export async function syncSources(options: SyncOptions = {}): Promise<SyncReport
     try {
       const files = await reader.listFiles(source); const adapter = registry[source.adapter]; if (!adapter) throw new Error(`Unknown adapter: ${source.adapter}`);
       const result = await adapter({ source, files, reader }); runs.push(...result.runs);
-      sourceReports.push({ sourceId: source.id, status: result.warnings.length ? "partial" as const : "success" as const, runCount: result.runs.length, syncedAt: new Date().toISOString(), error: null, warnings: result.warnings });
+      const warnings = result.runs.length === 0 && result.warnings.length === 0 ? ["No runs extracted"] : result.warnings;
+      sourceReports.push({ sourceId: source.id, status: warnings.length ? "partial" as const : "success" as const, runCount: result.runs.length, syncedAt: new Date().toISOString(), error: null, warnings });
     } catch (error) {
       sourceReports.push({ sourceId: source.id, status: "failed" as const, runCount: 0, syncedAt: new Date().toISOString(), error: error instanceof Error ? error.message : "Unknown sync error", warnings: [] });
     }
