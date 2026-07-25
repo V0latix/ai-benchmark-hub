@@ -4,7 +4,7 @@ import { getPreviewAssetUrl, getPreviewProxyUrl, injectInteractivePreview, injec
 
 describe("safe HTML previews", () => {
   it("uses an internal URL rather than framing raw GitHub content", () => {
-    expect(getPreviewProxyUrl("run/42")).toBe("/api/runs/run%2F42/visual?interactive=1");
+    expect(getPreviewProxyUrl("run/42")).toBe("/api/runs/run%2F42/visual?interactive=2");
   });
 
   it("adds the artifact directory as the base for relative assets", () => {
@@ -21,12 +21,12 @@ describe("safe HTML previews", () => {
 
   it("replaces a Vite entrypoint with a proxied module and import map", () => {
     const html = injectInteractivePreview('<html><head></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>', "/api/runs/run-42/visual/asset", { react: "19.1.0" });
-    expect(html).toContain('previewEntry.src = "/api/runs/run-42/visual/asset/src/main.tsx"');
+    expect(html).toContain('previewEntry.src = "/api/runs/run-42/visual/asset/src/main.tsx?preview=tailwind-2"');
     expect(html).toContain('"react":"https://esm.sh/react@19.1.0"');
     expect(html).toContain("previewStorage");
     expect(html).toContain("previewBootstrap");
     expect(html).toContain("previewError");
     expect(html).not.toContain('src="/src/main.tsx"');
-    expect(getPreviewAssetUrl("run/42", "src/main.tsx")).toBe("/api/runs/run%2F42/visual/asset/src/main.tsx");
+    expect(getPreviewAssetUrl("run/42", "src/main.tsx")).toBe("/api/runs/run%2F42/visual/asset/src/main.tsx?preview=tailwind-2");
   });
 });

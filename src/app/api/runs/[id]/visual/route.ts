@@ -2,7 +2,7 @@ import { getRunVisual } from "../../../../../components/run-visual";
 import { SafeGitHubReader } from "../../../../../lib/github/client";
 import { benchmarkSources } from "../../../../../lib/sources/config";
 import { getRunById } from "../../../../../lib/storage/queries";
-import { getPreviewAssetUrl, injectInteractivePreview, interactivePreviewCsp } from "../../../../../lib/visuals/preview";
+import { getPreviewAssetBaseUrl, injectInteractivePreview, interactivePreviewCsp } from "../../../../../lib/visuals/preview";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const run = await getRunById((await params).id);
@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const artifactDirectory = visual.path.split("/").slice(0, -1).join("/");
     const artifactSource = { ...source, allowlist: [`${artifactDirectory}/package.json`] };
     const manifest = JSON.parse(await new SafeGitHubReader().readText(artifactSource, `${artifactDirectory}/package.json`)) as { dependencies?: Record<string, string> };
-    return new Response(injectInteractivePreview(html, getPreviewAssetUrl(run.id, "").replace(/\/$/, ""), manifest.dependencies ?? {}), {
+    return new Response(injectInteractivePreview(html, getPreviewAssetBaseUrl(run.id), manifest.dependencies ?? {}), {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Content-Security-Policy": interactivePreviewCsp,
