@@ -8,12 +8,15 @@ export const melvynxAdapter: SourceAdapter = async (context) => {
     try {
       const raw = JSON.parse(await context.reader.readText(context.source, path));
       const data = object(raw);
+      const task = text(data.task);
+      const applicationName = text(data.app_name);
+      const previewRoot = task && applicationName ? `benchmarks/${task}/${applicationName}/` : null;
       return makeRun(context, raw, {
-      runId: text(data.run_id) ?? text(data.id), model: text(data.model), task: text(data.task), harness: text(data.harness),
+      runId: text(data.run_id) ?? text(data.id), model: text(data.model), task, harness: text(data.harness),
       status: normalizeStatus(data.status), durationMs: number(raw, ["duration_ms", "durationMs"]),
       totalCostUsd: number(raw, ["total_cost_usd", "cost_usd"]), inputTokens: number(raw, ["input_tokens"]),
       outputTokens: number(raw, ["output_tokens"]), totalTokens: number(raw, ["total_tokens"]), resultPath: path,
-      previewPath: text(data.task) ? context.files.find((candidate) => candidate.startsWith(`benchmarks/${text(data.task)}/`) && /(?:dist\/)?index\.html$/.test(candidate)) ?? null : null,
+      previewPath: previewRoot ? context.files.find((candidate) => candidate.startsWith(previewRoot) && /(?:dist\/)?index\.html$/.test(candidate)) ?? null : null,
       transcriptPath: context.files.includes("transcripts.json") ? "transcripts.json" : null, tags: ["melvynx"]
       });
     } catch {

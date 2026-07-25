@@ -34,4 +34,12 @@ describe("JSON cache", () => {
     expect(cache.runs).toHaveLength(235);
     expect(cache.runs[0].sourceId).toBe("melvynx-benchmarks");
   });
+
+  it("keeps only the preview that matches a bundled run application", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "benchmark-hub-"));
+    const cache = await readCache(join(cacheRoot, "missing"));
+    const sonnet = cache.runs.find((run) => run.id === "melvynx-benchmarks-20260714T202117Z-claude-sonnet-5-cc");
+
+    expect(sonnet?.previewPath).toBe("benchmarks/gmail-clone/2026-07-14-cc-claude-sonnet-5/index.html");
+  });
 });

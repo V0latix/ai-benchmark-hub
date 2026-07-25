@@ -1,13 +1,18 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import bundledPreviewPaths from "../../data/melvynx-preview-paths.json";
 import melvynxSnapshot from "../../data/melvynx-runs.snapshot.json";
 import type { NormalizedRun, SyncReport } from "../sources/types";
 
 export type CachePayload = { runs: NormalizedRun[]; report: SyncReport };
 
+function hasApplicationName(run: NormalizedRun): boolean {
+  return Boolean(run.raw && typeof run.raw === "object" && !Array.isArray(run.raw) && typeof (run.raw as { app_name?: unknown }).app_name === "string");
+}
+
 const bundledSnapshot: CachePayload = {
-  runs: melvynxSnapshot as NormalizedRun[],
+  runs: (melvynxSnapshot as NormalizedRun[]).map((run) => hasApplicationName(run) ? { ...run, previewPath: bundledPreviewPaths[run.id as keyof typeof bundledPreviewPaths] ?? null } : run),
   report: {
     generatedAt: null,
     sources: [{ sourceId: "melvynx-benchmarks", status: "success", runCount: melvynxSnapshot.length, syncedAt: null, error: null, warnings: [] }]
