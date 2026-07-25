@@ -13,7 +13,7 @@ describe("getRunVisual", () => {
 
   it("returns a sandboxed preview when no screenshot exists", () => {
     expect(getRunVisual(run({ id: "run-42", task: "demo", previewPath: "benchmarks/demo/preview/index.html" }), "public"))
-      .toMatchObject({ kind: "preview", url: "/api/runs/run-42/visual?interactive=1" });
+      .toMatchObject({ kind: "preview", url: "/api/runs/run-42/visual?interactive=2" });
   });
 
   it("does not show a visual belonging to a different task", () => {

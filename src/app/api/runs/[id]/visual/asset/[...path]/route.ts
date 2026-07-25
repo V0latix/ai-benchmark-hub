@@ -24,7 +24,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         try {
           const sourceFiles = isStylesheet ? await reader.listFiles(artifactSource) : []; const sourceTexts = isStylesheet ? await Promise.all(sourceFiles.filter((path) => /\.[cm]?[jt]sx?$/i.test(path)).map((path) => reader.readText(artifactSource, path).catch(() => ""))) : [];
           const body = isModule ? transformPreviewModule(text, filePath) : isStylesheet && /@import\s+["']tailwindcss["']/i.test(text) ? await compilePreviewStylesheet(text, extractTailwindCandidates(sourceTexts.join("\n"))) : isStylesheet ? transformPreviewStylesheet(text) : text;
-          return new Response(body, { headers: { "Content-Type": isModule ? "text/javascript; charset=utf-8" : isStylesheet ? "text/css; charset=utf-8" : "image/svg+xml", "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } });
+          return new Response(body, { headers: { "Content-Type": isModule ? "text/javascript; charset=utf-8" : isStylesheet ? "text/css; charset=utf-8" : "image/svg+xml", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } });
         } catch (error) { return new Response(error instanceof Error ? error.message : "Asset transform failed", { status: 500 }); }
       } catch { /* Try the next safe extension or public-file location. */ }
     }
