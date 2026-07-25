@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isSafeEsmModulePath, rewriteEsmModuleImports } from "../../src/lib/visuals/vendor";
+import { getEsmPackageVersion, isSafeEsmModulePath, rewriteEsmModuleImports } from "../../src/lib/visuals/vendor";
 
 describe("preview ESM vendor proxy", () => {
   it("keeps transitive ESM imports on the preview origin", () => {
@@ -42,5 +42,18 @@ describe("preview ESM vendor proxy", () => {
 
     expect(rewritten).toContain('import "/api/runs/run-42/visual/vendor/react@%5E16.5.1%20%7C%7C%20%5E17.0.0%20%7C%7C%20%5E18.0.0%20%7C%7C%20%5E19.0.0?upstream=target%3Des2022"');
     expect(isSafeEsmModulePath("react@^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0")).toBe(true);
+  });
+
+  it("pins transitive React peer imports to the preview React runtime", () => {
+    const source = 'import*as React from"/react@^16.8.0%20||%20^17.0.0%20||%20^18.0.0%20||%20^19.0.0?target=es2022";';
+    const rewritten = rewriteEsmModuleImports(source, "/api/runs/run-42/visual/vendor", { react: "^19.2.7" });
+
+    expect(rewritten).toContain('from"/api/runs/run-42/visual/vendor/react@%5E19.2.7?upstream=target%3Des2022"');
+    expect(rewritten).not.toContain("16.8.0");
+  });
+
+  it("reads the exact React version selected by esm.sh", () => {
+    expect(getEsmPackageVersion("/* esm.sh - react@19.2.8 */\nexport {}", "react")).toBe("19.2.8");
+    expect(getEsmPackageVersion("/* esm.sh - react-dom@19.2.8 */\nexport {}", "react-dom")).toBe("19.2.8");
   });
 });
