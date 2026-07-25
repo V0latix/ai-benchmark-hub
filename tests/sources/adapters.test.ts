@@ -5,7 +5,7 @@ import { getAdapter } from "../../src/lib/sources/registry";
 import type { AdapterContext, RemoteFileReader } from "../../src/lib/sources/types";
 
 const fixtureFiles: Record<string, string> = {
-  "runs/demo/data/metadata.json": JSON.stringify({ run_id: "mel-1", model: "gpt-5", status: "success", total_cost_usd: 0.42, duration_ms: 1200 }),
+  "runs/demo/data/metadata.json": JSON.stringify({ run_id: "mel-1", task: "demo", model: "gpt-5", status: "success", total_cost_usd: 0.42, duration_ms: 1200 }),
   "docs/report.md": "- Model: Claude 4\n- Score: 82%\n- Status: pass",
   "runs/snapshots/demo/SNAPSHOT.json": JSON.stringify({ id: "code-1", model: "gemini-2.5", reward: 0.7 }),
   "all_preds.jsonl": JSON.stringify({ model_name_or_path: "swe-agent", instance_id: "submission-1" }),
@@ -53,5 +53,11 @@ describe("source adapters", () => {
     const result = await getAdapter("melvynx")({ ...melvynx, files: ["runs/demo/data/metadata.json", "runs/empty/data/metadata.json"] });
     expect(result.runs).toHaveLength(1);
     expect(result.warnings).toEqual(["Skipped invalid JSON: runs/empty/data/metadata.json"]);
+  });
+
+  it("uses the preview that belongs to the Melvynx task", async () => {
+    const melvynx = context("melvynx-benchmarks");
+    const result = await getAdapter("melvynx")({ ...melvynx, files: ["runs/demo/data/metadata.json", "benchmarks/other/index.html", "benchmarks/demo/preview/index.html"] });
+    expect(result.runs[0].previewPath).toBe("benchmarks/demo/preview/index.html");
   });
 });
