@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getPreviewAssetUrl, getPreviewProxyUrl, injectInteractivePreview, injectPreviewBase, interactivePreviewCorsHeaders, interactivePreviewCsp, interactivePreviewSandbox } from "../../src/lib/visuals/preview";
+import { getPreviewAssetUrl, getPreviewProxyUrl, injectInteractivePreview, injectPreviewBase, injectStandalonePreview, interactivePreviewCorsHeaders, interactivePreviewCsp, interactivePreviewSandbox } from "../../src/lib/visuals/preview";
 
 describe("safe HTML previews", () => {
   it("uses an internal URL rather than framing raw GitHub content", () => {
@@ -28,5 +28,13 @@ describe("safe HTML previews", () => {
     expect(html).toContain("previewError");
     expect(html).not.toContain('src="/src/main.tsx"');
     expect(getPreviewAssetUrl("run/42", "src/main.tsx")).toBe("/api/runs/run%2F42/visual/asset/src/main.tsx?preview=tailwind-2");
+  });
+
+  it("keeps standalone HTML modules and does not add a Vite entrypoint", () => {
+    const html = injectStandalonePreview('<html><head></head><body><script type="module">import "three";</script></body></html>', "/api/runs/run-42/visual/asset");
+    expect(html).toContain('import "three";');
+    expect(html).toContain("previewStorage");
+    expect(html).not.toContain("src/main.tsx");
+    expect(html).not.toContain("previewEntry");
   });
 });
