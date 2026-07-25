@@ -25,6 +25,12 @@ export async function queryRuns(filters: RunFilters = {}) {
 
 export async function getRunById(id: string) { return (await getCache()).runs.find((run) => run.id === id) ?? null; }
 
+export async function getTaskSummaries() {
+  const { runs } = await getCache(); const tasks = new Map<string, { task: string; runCount: number; sourceIds: Set<string> }>();
+  for (const run of runs) if (run.task) { const entry = tasks.get(run.task) ?? { task: run.task, runCount: 0, sourceIds: new Set<string>() }; entry.runCount++; entry.sourceIds.add(run.sourceId); tasks.set(run.task, entry); }
+  return [...tasks.values()].map((entry) => ({ task: entry.task, runCount: entry.runCount, sourceCount: entry.sourceIds.size })).sort((a, b) => a.task.localeCompare(b.task));
+}
+
 export async function getModelComparisons() {
   const { runs } = await getCache(); const groups = new Map<string, NormalizedRun[]>();
   for (const run of runs) if (run.model) groups.set(run.model, [...(groups.get(run.model) ?? []), run]);
