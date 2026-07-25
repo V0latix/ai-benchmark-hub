@@ -1,9 +1,18 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import melvynxSnapshot from "../../data/melvynx-runs.snapshot.json";
 import type { NormalizedRun, SyncReport } from "../sources/types";
 
 export type CachePayload = { runs: NormalizedRun[]; report: SyncReport };
+
+const bundledSnapshot: CachePayload = {
+  runs: melvynxSnapshot as NormalizedRun[],
+  report: {
+    generatedAt: null,
+    sources: [{ sourceId: "melvynx-benchmarks", status: "success", runCount: melvynxSnapshot.length, syncedAt: null, error: null, warnings: [] }]
+  }
+};
 
 export function getDefaultCacheRoot(cwd = process.cwd(), isVercel = Boolean(process.env.VERCEL)): string {
   return isVercel ? join("/tmp", "benchmark-hub") : join(cwd, ".cache", "benchmark-hub");
@@ -22,9 +31,13 @@ export async function writeCache(payload: CachePayload, root = getDefaultCacheRo
 }
 
 export async function readCache(root = getDefaultCacheRoot()): Promise<CachePayload> {
-  const [runs, report] = await Promise.all([
-    readFile(join(root, "runs.json"), "utf8").then((content) => JSON.parse(content) as NormalizedRun[]),
-    readFile(join(root, "sync-report.json"), "utf8").then((content) => JSON.parse(content) as SyncReport)
-  ]);
-  return { runs, report };
+  try {
+    const [runs, report] = await Promise.all([
+      readFile(join(root, "runs.json"), "utf8").then((content) => JSON.parse(content) as NormalizedRun[]),
+      readFile(join(root, "sync-report.json"), "utf8").then((content) => JSON.parse(content) as SyncReport)
+    ]);
+    return { runs, report };
+  } catch {
+    return bundledSnapshot;
+  }
 }

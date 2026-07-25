@@ -1,5 +1,5 @@
 import { SafeGitHubReader } from "../github/client";
-import { writeCache } from "../storage/json-store";
+import { readCache, writeCache } from "../storage/json-store";
 import { benchmarkSources } from "./config";
 import { adapterRegistry } from "./registry";
 import type { BenchmarkSource, RemoteFileReader, SourceAdapter, SyncReport } from "./types";
@@ -21,6 +21,11 @@ export async function syncSources(options: SyncOptions = {}): Promise<SyncReport
     }
   }
   const report: SyncReport = { generatedAt: new Date().toISOString(), sources: sourceReports };
-  if (options.persist !== false) await writeCache({ runs, report });
+  if (options.persist !== false) {
+    const existing = options.sourceId ? await readCache() : null;
+    const cachedRuns = existing ? existing.runs.filter((run) => run.sourceId !== options.sourceId) : [];
+    const cachedReports = existing ? existing.report.sources.filter((source) => source.sourceId !== options.sourceId) : [];
+    await writeCache({ runs: [...cachedRuns, ...runs], report: { generatedAt: report.generatedAt, sources: [...cachedReports, ...report.sources] } });
+  }
   return report;
 }

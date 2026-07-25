@@ -26,4 +26,12 @@ describe("JSON cache", () => {
       report: { generatedAt: "2026-07-25T00:00:00.000Z", sources: [report] }
     });
   });
+
+  it("falls back to the bundled Melvynx snapshot when cache files are unavailable", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "benchmark-hub-"));
+    const cache = await readCache(join(cacheRoot, "missing"));
+
+    expect(cache.runs).toHaveLength(235);
+    expect(cache.runs[0].sourceId).toBe("melvynx-benchmarks");
+  });
 });
