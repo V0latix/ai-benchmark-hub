@@ -2,6 +2,7 @@ import { isAllowedPath, isTextPath } from "./paths";
 import type { BenchmarkSource } from "../sources/types";
 
 export const MAX_TEXT_FILE_BYTES = 750_000;
+export const MAX_BINARY_FILE_BYTES = 3_000_000;
 
 type TreeResponse = { tree?: Array<{ path: string; type: string }> };
 
@@ -25,6 +26,18 @@ export class SafeGitHubReader {
     const text = await response.text();
     if (new TextEncoder().encode(text).byteLength > MAX_TEXT_FILE_BYTES) throw new Error(`Remote file exceeds ${MAX_TEXT_FILE_BYTES} bytes`);
     return text;
+  }
+
+  async readBinary(source: BenchmarkSource, filePath: string): Promise<Uint8Array> {
+    if (!isAllowedPath(source, filePath)) throw new Error(`Unsafe remote file path: ${filePath}`);
+    const url = `https://raw.githubusercontent.com/${source.repo}/${source.branch}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
+    const response = await this.fetcher(url, { headers: this.headers() });
+    if (!response.ok) throw new Error(`GitHub file request failed (${response.status})`);
+    const length = Number(response.headers.get("content-length") ?? "0");
+    if (length > MAX_BINARY_FILE_BYTES) throw new Error(`Remote file exceeds ${MAX_BINARY_FILE_BYTES} bytes`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > MAX_BINARY_FILE_BYTES) throw new Error(`Remote file exceeds ${MAX_BINARY_FILE_BYTES} bytes`);
+    return bytes;
   }
 
   private headers(): HeadersInit {

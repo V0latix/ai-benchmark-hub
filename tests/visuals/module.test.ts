@@ -10,6 +10,13 @@ describe("preview module transform", () => {
     expect(code).not.toContain("import './index.css'");
   });
 
+  it("turns Vite static asset imports into URLs served by the preview proxy", () => {
+    const code = transformPreviewModule("import hero from './assets/hero.png'; export const App = () => <img src={hero} />;", "src/App.tsx");
+
+    expect(code).toContain('const hero = new URL("./assets/hero.png", import.meta.url).href;');
+    expect(code).not.toContain("from './assets/hero.png'");
+  });
+
   it("removes the Vite-only Tailwind import from a stylesheet", () => {
     expect(transformPreviewStylesheet('@import "tailwindcss";\n:root { color: red; }')).toBe(':root { color: red; }');
   });

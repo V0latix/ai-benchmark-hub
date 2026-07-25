@@ -19,10 +19,12 @@ describe("safe HTML previews", () => {
     expect(interactivePreviewCorsHeaders).toEqual({ "Access-Control-Allow-Origin": "*" });
   });
 
-  it("replaces a Vite entrypoint with a proxied module and import map", () => {
-    const html = injectInteractivePreview('<html><head></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>', "/api/runs/run-42/visual/asset", { react: "19.1.0" });
+  it("replaces a Vite entrypoint with proxied modules and local React runtime imports", () => {
+    const html = injectInteractivePreview('<html><head></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>', "/api/runs/run-42/visual/asset", { react: "^19.2.7" });
     expect(html).toContain('previewEntry.src = "/api/runs/run-42/visual/asset/src/main.tsx?preview=tailwind-2"');
-    expect(html).toContain('"react":"https://esm.sh/react@19.1.0"');
+    expect(html).toContain('"react":"/api/runs/run-42/visual/vendor/react@%5E19.2.7"');
+    expect(html).toContain('"react/":"/api/runs/run-42/visual/vendor/react@%5E19.2.7/"');
+    expect(html).not.toContain("https://esm.sh/");
     expect(html).toContain("previewStorage");
     expect(html).toContain("previewBootstrap");
     expect(html).toContain("previewError");
