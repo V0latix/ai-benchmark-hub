@@ -41,4 +41,10 @@ describe("source adapters", () => {
     expect(result.runs[0]).toMatchObject({ sourceId, model });
     expect(result.runs[0].raw).toBeTruthy();
   });
+
+  it("returns a warning instead of throwing when Tinybird result data is absent", async () => {
+    const tinybird = context("tinybird-llm-benchmark");
+    const result = await getAdapter("tinybird")({ ...tinybird, files: [], reader: { listFiles: async () => [], readText: async () => { throw new Error("not found"); } } });
+    expect(result).toEqual({ runs: [], warnings: ["No Tinybird results file found"] });
+  });
 });
