@@ -11,6 +11,11 @@ describe("filterRuns", () => {
     expect(visible.map((item) => item.id)).toEqual(["keep"]);
   });
 
+  it("requires an exact task match even when all other values match", () => {
+    const visible = filterRuns([run("gmail", { task: "gmail-clone" }), run("other", { task: "figma-clone" })], { source: "source-a", model: "model-a", task: "gmail-clone", harness: "harness-a", status: "success", search: "", sort: "cost" });
+    expect(visible.map((item) => item.id)).toEqual(["gmail"]);
+  });
+
   it("sorts unknown costs after known costs", () => {
     const visible = filterRuns([run("unknown", { totalCostUsd: null }), run("expensive", { totalCostUsd: 2 }), run("cheap", { totalCostUsd: 1 })], { source: "", model: "", task: "", harness: "", status: "", search: "", sort: "cost" });
     expect(visible.map((item) => item.id)).toEqual(["expensive", "cheap", "unknown"]);
