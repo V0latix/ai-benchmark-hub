@@ -42,3 +42,17 @@ export type SourceSyncReport = {
   error: string | null;
   warnings: string[];
 };
+
+export type BenchmarkSource = {
+  id: string;
+  repo: string;
+  branch: string;
+  adapter: string;
+  enabled: boolean;
+  allowlist: string[];
+};
+
+export type SyncReport = {
+  generatedAt: string | null;
+  sources: SourceSyncReport[];
+};
