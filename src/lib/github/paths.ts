@@ -20,5 +20,5 @@ export function isAllowedPath(source: BenchmarkSource, filePath: string): boolea
 }
 
 export function isTextPath(filePath: string): boolean {
-  return /\.(?:csv|html?|jsonl?|md|ya?ml|log|txt)$/i.test(filePath);
+  return /\.(?:csv|css|html?|jsonl?|md|ya?ml|log|txt|svg|[cm]?[jt]sx?)$/i.test(filePath);
 }

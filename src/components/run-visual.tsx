@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import type { NormalizedRun } from "../lib/sources/types";
-import { getPreviewProxyUrl } from "../lib/visuals/preview";
+import { getPreviewProxyUrl, interactivePreviewSandbox } from "../lib/visuals/preview";
 
 /* eslint-disable @next/next/no-img-element -- result screenshots are external, allowlisted artifacts. */
 
@@ -20,5 +20,5 @@ export function getRunVisual(run: Pick<NormalizedRun, "id" | "sourceRepo" | "tas
 export function RunVisual({ run, branch }: { run: NormalizedRun; branch: string }) {
   const visual = getRunVisual(run, branch);
   if (visual.kind === "unavailable") return <section className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-950/70 text-center text-sm text-slate-400"><div><p>No visual artifact is available for this run.</p>{run.resultPath && <Link className="mt-2 inline-block text-sky-300" href={`https://github.com/${run.sourceRepo}/blob/${branch}/${run.resultPath}`}>Open the source result</Link>}</div></section>;
-  return <section className="overflow-hidden rounded-xl border border-slate-700 bg-slate-950 shadow-2xl shadow-sky-950/20"><div className="flex items-center justify-between border-b border-slate-800 px-4 py-3"><div><p className="text-sm font-medium text-white">{visual.kind === "screenshot" ? "Result screenshot" : "Result preview"}</p>{visual.kind === "preview" && <p className="text-xs text-slate-400">Sandboxed — external scripts are disabled</p>}</div><Link className="text-sm text-sky-300" href={`https://github.com/${run.sourceRepo}/blob/${branch}/${visual.path}`}>Open source</Link></div>{visual.kind === "screenshot" ? <img alt={`Visual result for ${run.id}`} className="aspect-video w-full object-contain" src={visual.url}/> : <iframe className="aspect-video w-full bg-white" sandbox="" src={visual.url} title={`Visual result for ${run.id}`}/>}</section>;
+  return <section className="overflow-hidden rounded-xl border border-slate-700 bg-slate-950 shadow-2xl shadow-sky-950/20"><div className="flex items-center justify-between border-b border-slate-800 px-4 py-3"><div><p className="text-sm font-medium text-white">{visual.kind === "screenshot" ? "Result screenshot" : "Result preview"}</p>{visual.kind === "preview" && <p className="text-xs text-slate-400">Interactive sandbox — no parent-page access</p>}</div><Link className="text-sm text-sky-300" href={`https://github.com/${run.sourceRepo}/blob/${branch}/${visual.path}`}>Open source</Link></div>{visual.kind === "screenshot" ? <img alt={`Visual result for ${run.id}`} className="aspect-video w-full object-contain" src={visual.url}/> : <iframe className="aspect-video w-full bg-white" sandbox={interactivePreviewSandbox} src={visual.url} title={`Visual result for ${run.id}`}/>}</section>;
 }
