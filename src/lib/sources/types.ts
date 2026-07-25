@@ -56,3 +56,12 @@ export type SyncReport = {
   generatedAt: string | null;
   sources: SourceSyncReport[];
 };
+
+export type RemoteFileReader = {
+  listFiles(source: BenchmarkSource): Promise<string[]>;
+  readText(source: BenchmarkSource, filePath: string): Promise<string>;
+};
+
+export type AdapterContext = { source: BenchmarkSource; files: string[]; reader: RemoteFileReader };
+export type AdapterResult = { runs: NormalizedRun[]; warnings: string[] };
+export type SourceAdapter = (context: AdapterContext) => Promise<AdapterResult>;
