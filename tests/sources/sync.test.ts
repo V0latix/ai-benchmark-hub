@@ -18,8 +18,13 @@ describe("syncSources", () => {
     });
 
     expect(report.sources).toEqual(expect.arrayContaining([
-      expect.objectContaining({ sourceId: "one", status: "success" }),
+      expect.objectContaining({ sourceId: "one", status: "partial", warnings: ["No runs extracted"] }),
       expect.objectContaining({ sourceId: "two", status: "failed", error: "fixture failure" })
     ]));
+  });
+
+  it("marks an empty successful adapter result as partial", async () => {
+    const report = await syncSources({ sources: [{ id: "empty", repo: "owner/empty", branch: "main", adapter: "empty", enabled: true, allowlist: ["data.json"] }], reader: { listFiles: async () => ["data.json"], readText: async () => "{}" }, registry: { empty: async () => ({ runs: [], warnings: [] }) }, persist: false });
+    expect(report.sources[0]).toMatchObject({ status: "partial", warnings: ["No runs extracted"] });
   });
 });
