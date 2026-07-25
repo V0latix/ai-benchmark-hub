@@ -5,7 +5,8 @@ function encodePath(path: string): string {
 function vendorSpecifier(specifier: string, vendorBaseUrl: string): string {
   const upstream = specifier.replace(/^https:\/\/esm\.sh\//, "").replace(/^\//, "");
   const [path, query] = upstream.split("?", 2);
-  return `${vendorBaseUrl}/${encodePath(path)}${query ? `?upstream=${encodeURIComponent(query)}` : ""}`;
+  const decodedPath = decodeURIComponent(path);
+  return `${vendorBaseUrl}/${encodePath(decodedPath)}${query ? `?upstream=${encodeURIComponent(query)}` : ""}`;
 }
 
 export function rewriteEsmModuleImports(source: string, vendorBaseUrl: string): string {
@@ -17,7 +18,7 @@ export function rewriteEsmModuleImports(source: string, vendorBaseUrl: string): 
 }
 
 export function isSafeEsmModulePath(path: string): boolean {
-  return Boolean(path) && !path.includes("..") && /^[a-zA-Z0-9@._~^*<>=|/-]+$/.test(path);
+  return Boolean(path) && !path.includes("..") && /^[a-zA-Z0-9 @._~^*<>=|/-]+$/.test(path);
 }
 
 export function isSafeEsmQuery(query: string): boolean {
