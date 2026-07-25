@@ -5,7 +5,9 @@ import type { NormalizedRun, SyncReport } from "../sources/types";
 
 export type CachePayload = { runs: NormalizedRun[]; report: SyncReport };
 
-const defaultRoot = join(process.cwd(), ".cache", "benchmark-hub");
+export function getDefaultCacheRoot(cwd = process.cwd(), isVercel = Boolean(process.env.VERCEL)): string {
+  return isVercel ? join("/tmp", "benchmark-hub") : join(cwd, ".cache", "benchmark-hub");
+}
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   const temporaryPath = `${filePath}.${process.pid}.tmp`;
@@ -13,13 +15,13 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
   await rename(temporaryPath, filePath);
 }
 
-export async function writeCache(payload: CachePayload, root = defaultRoot): Promise<void> {
+export async function writeCache(payload: CachePayload, root = getDefaultCacheRoot()): Promise<void> {
   await mkdir(root, { recursive: true });
   await writeJson(join(root, "runs.json"), payload.runs);
   await writeJson(join(root, "sync-report.json"), payload.report);
 }
 
-export async function readCache(root = defaultRoot): Promise<CachePayload> {
+export async function readCache(root = getDefaultCacheRoot()): Promise<CachePayload> {
   const [runs, report] = await Promise.all([
     readFile(join(root, "runs.json"), "utf8").then((content) => JSON.parse(content) as NormalizedRun[]),
     readFile(join(root, "sync-report.json"), "utf8").then((content) => JSON.parse(content) as SyncReport)
