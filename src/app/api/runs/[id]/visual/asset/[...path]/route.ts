@@ -1,7 +1,7 @@
 import { SafeGitHubReader } from "../../../../../../../lib/github/client";
 import { benchmarkSources } from "../../../../../../../lib/sources/config";
 import { getRunById } from "../../../../../../../lib/storage/queries";
-import { transformPreviewModule } from "../../../../../../../lib/visuals/module";
+import { transformPreviewModule, transformPreviewStylesheet } from "../../../../../../../lib/visuals/module";
 import { getRunVisual } from "../../../../../../../components/run-visual";
 import { interactivePreviewCorsHeaders } from "../../../../../../../lib/visuals/preview";
 
@@ -20,7 +20,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     for (const filePath of [`${directory}/${candidate}`, `${directory}/public/${candidate}`]) {
       try {
         const text = await reader.readText(artifactSource, filePath); const isModule = /\.[cm]?[jt]sx?$/i.test(filePath);
-        return new Response(isModule ? transformPreviewModule(text, filePath) : text, { headers: { "Content-Type": isModule ? "text/javascript; charset=utf-8" : filePath.endsWith(".css") ? "text/css; charset=utf-8" : "image/svg+xml", "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } });
+        return new Response(isModule ? transformPreviewModule(text, filePath) : filePath.endsWith(".css") ? transformPreviewStylesheet(text) : text, { headers: { "Content-Type": isModule ? "text/javascript; charset=utf-8" : filePath.endsWith(".css") ? "text/css; charset=utf-8" : "image/svg+xml", "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } });
       } catch { /* Try the next safe extension or public-file location. */ }
     }
   }

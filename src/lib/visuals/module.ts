@@ -10,3 +10,7 @@ export function transformPreviewModule(source: string, path: string): string {
   const styleLoader = styles.map((style, index) => `const previewStyle${index} = document.createElement("link"); previewStyle${index}.rel = "stylesheet"; previewStyle${index}.href = new URL(${JSON.stringify(style)}, import.meta.url).href; document.head.append(previewStyle${index});`).join("\n");
   return `${styleLoader}\n${transformed}`;
 }
+
+export function transformPreviewStylesheet(source: string): string {
+  return source.replace(/@import\s+["']tailwindcss["'];?\s*/g, "");
+}
