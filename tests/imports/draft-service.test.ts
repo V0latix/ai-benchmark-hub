@@ -161,11 +161,9 @@ describe("import draft service", () => {
     writer.treeEntries.set("main-commit", [
       { path: "benchmarks", type: "tree", sha: "1".repeat(40) },
       { path: "benchmarks/gmail-clone", type: "tree", sha: "2".repeat(40) },
-      { path: "benchmarks/gmail-clone/2026-07-26-lmarena-model-a", type: "tree", sha: "3".repeat(40) },
       { path: "benchmarks/gmail-clone/an-existing-app", type: "tree", sha: "4".repeat(40) },
       { path: "benchmarks/gmail-clone/an-existing-app/index.html", type: "blob", sha: "5".repeat(40) },
       { path: "runs", type: "tree", sha: "6".repeat(40) },
-      { path: "runs/20260726T120000Z-model-a-lmarena", type: "tree", sha: "7".repeat(40) },
       { path: "runs/an-existing-run", type: "tree", sha: "8".repeat(40) },
       { path: "runs/an-existing-run/data/gmail-clone/metadata.json", type: "blob", sha: "9".repeat(40) }
     ]);
@@ -201,6 +199,28 @@ describe("import draft service", () => {
     }
   });
 
+  it("reserves the complete deterministic application and run roots", async () => {
+    const collisions = [
+      { path: "benchmarks/gmail-clone/2026-07-26-lmarena-model-a", type: "tree" },
+      { path: "benchmarks/gmail-clone/2026-07-26-lmarena-model-a/old.js", type: "blob" },
+      { path: "runs/20260726T120000Z-model-a-lmarena", type: "tree" },
+      { path: "runs/20260726T120000Z-model-a-lmarena/data/other/metadata.json", type: "blob" }
+    ];
+
+    for (const collision of collisions) {
+      const writer = new InMemoryGitWriter();
+      writer.treeEntries.set("main-commit", [{ ...collision, sha: "e".repeat(40) }]);
+
+      await expect(finalizeDraft(
+        { metadata, receipts: [receipt()], draftId: DRAFT_ID },
+        writer,
+        SECRET,
+        { now: NOW }
+      )).rejects.toThrow(/collision/i);
+      expect(writer.commits).toHaveLength(0);
+    }
+  });
+
   it("rejects replay after time advances without creating another branch or commit", async () => {
     const writer = new InMemoryGitWriter();
     const input = { metadata, receipts: [receipt()], draftId: DRAFT_ID };
@@ -223,7 +243,7 @@ describe("import draft service", () => {
     const input = { metadata, receipts: [receipt()], draftId: DRAFT_ID };
     const first = await finalizeDraft(input, writer, SECRET, { now: NOW });
 
-    await expect(finalizeDraft(input, writer, SECRET, { now: NOW }))
+    await expect(finalizeDraft(input, writer, SECRET, { now: NOW + 60_000 }))
       .rejects.toThrow(/already exists/i);
     expect([...writer.refs.keys()].filter((branch) => branch.startsWith("imports/"))).toEqual([first.branch]);
   });

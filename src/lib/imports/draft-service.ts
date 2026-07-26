@@ -144,13 +144,21 @@ function verifyReceipts(
 
 function assertNoImmutableCollision(
   existing: Array<{ path: string; type: string }>,
-  candidatePaths: string[]
+  candidatePaths: string[],
+  reservedRoots: string[]
 ): void {
   const existingEntries = existing.map((entry) => ({
     path: entry.path.normalize("NFC").toLocaleLowerCase("en-US"),
     type: entry.type
   }));
   const candidates = candidatePaths.map((path) => path.normalize("NFC").toLocaleLowerCase("en-US"));
+  const roots = reservedRoots.map((path) => path.normalize("NFC").toLocaleLowerCase("en-US"));
+
+  if (roots.some((root) => existingEntries.some((entry) => (
+    entry.path === root || entry.path.startsWith(`${root}/`)
+  )))) {
+    throw new Error("Import path collision on immutable main content");
+  }
 
   for (const candidate of candidates) {
     for (const entry of existingEntries) {
@@ -258,7 +266,11 @@ export async function finalizeDraft(
 
   const mainHead = await writer.getHead("main");
   const existing = await writer.listTree(mainHead.commitSha);
-  assertNoImmutableCollision(existing, [...artifactEntries.map((entry) => entry.path), metadataPath]);
+  assertNoImmutableCollision(
+    existing,
+    [...artifactEntries.map((entry) => entry.path), metadataPath],
+    [artifactRoot, runRoot]
+  );
 
   const metadataSha = await writer.createBlob(metadataBytes(metadata));
   const entries: GitTreeEntry[] = [
@@ -271,7 +283,8 @@ export async function finalizeDraft(
     treeSha,
     mainHead.commitSha
   );
-  const branch = `imports/${Math.floor(now / 1_000)}-${input.draftId}`;
+  const draftCreatedAt = Math.min(...receipts.map((receipt) => receipt.expiresAt)) - IMPORT_TOKEN_TTL_MS;
+  const branch = `imports/${Math.floor(draftCreatedAt / 1_000)}-${input.draftId}`;
   await writer.createBranch(branch, commitSha);
 
   const draftToken = signDraftToken({
