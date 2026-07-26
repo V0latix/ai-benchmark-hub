@@ -40,23 +40,35 @@ describe("bundled snapshot query boundary", () => {
     expect(cards.find((card) => card.task === "timezone-checker")?.representativeRunId).not.toBe(sharedId);
   });
 
-  it("merges the last successful live overlay when its next refresh fails", async () => {
+  it("merges a validated durable snapshot without altering bundled rows", async () => {
     vi.stubEnv("VERCEL", "1");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 404 })));
     const imported = makeNormalizedRun("live-run", { task: "live-task" });
-    const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ version: 1, runs: [imported] }), { status: 200 }))
-      .mockRejectedValueOnce(new Error("offline"));
-    const readImportedRuns = createImportedRunsReader();
-    const readImports = () => readImportedRuns(fetcher);
+    const snapshot = {
+      refreshedAt: "2026-07-27T00:00:00.000Z",
+      runs: [imported],
+      warnings: []
+    };
+    const readImports = createImportedRunsReader(async () => snapshot, {
+      now: () => Date.parse("2026-07-27T00:00:01.000Z")
+    });
 
     const fresh = await getCache(readImports);
-    const stale = await getCache(readImports);
 
     expect(fresh.runs).toHaveLength(236);
     expect(fresh.runs.at(-1)).toEqual(imported);
     expect(fresh.freshnessWarnings).toEqual([]);
-    expect(stale.runs).toEqual(fresh.runs);
-    expect(stale.freshnessWarnings).toEqual(["Unable to refresh imported runs"]);
+  });
+
+  it("keeps all 235 bundled rows and exposes a warning when the durable cache has no first value", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const readImports = createImportedRunsReader(async () => {
+      throw new Error("cold cache");
+    });
+
+    const cache = await getCache(readImports);
+
+    expect(cache.runs).toEqual(readBundledSnapshot().runs);
+    expect(cache.runs).toHaveLength(235);
+    expect(cache.freshnessWarnings).toEqual(["Unable to refresh imported runs"]);
   });
 });

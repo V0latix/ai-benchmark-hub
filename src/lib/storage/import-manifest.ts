@@ -7,11 +7,15 @@ import {
 } from "../sources/types";
 
 const IMPORT_MANIFEST_URL = "https://raw.githubusercontent.com/Melvynx/benchmarks/main/imports/index.json";
+const IMPORT_MANIFEST_STALE_AFTER_MS = 300_000;
+const IMPORT_MANIFEST_FRESHNESS_WARNING = "Unable to refresh imported runs";
 const runStatuses: RunStatus[] = ["success", "failed", "partial", "timeout", "unknown"];
 
 export type ImportedRunManifest = { version: 1; runs: NormalizedRun[] };
 export type ParsedImportedRuns = { runs: NormalizedRun[]; warnings: string[] };
-export type ImportedRunsReader = (fetcher?: typeof fetch) => Promise<ParsedImportedRuns>;
+export type ImportedRunsSnapshot = ParsedImportedRuns & { refreshedAt: string };
+export type ImportedRunsSnapshotReader = () => Promise<ImportedRunsSnapshot>;
+export type ImportedRunsReader = () => Promise<ParsedImportedRuns>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -95,39 +99,44 @@ export function mergeImportedRuns(bundled: NormalizedRun[], imported: Normalized
   return merged;
 }
 
-export function createImportedRunsReader(): ImportedRunsReader {
-  let lastKnownGoodRuns: NormalizedRun[] | null = null;
+export async function loadImportedRunsSnapshot(
+  fetcher: typeof fetch = fetch,
+  refreshedAt: () => Date = () => new Date()
+): Promise<ImportedRunsSnapshot> {
+  const response = await fetcher(IMPORT_MANIFEST_URL, { cache: "no-store" });
+  if (!response.ok) throw new Error("Imported run manifest request failed");
 
-  function refreshFailure() {
-    return {
-      runs: lastKnownGoodRuns ? [...lastKnownGoodRuns] : [],
-      warnings: ["Unable to refresh imported runs"]
-    };
-  }
+  const value: unknown = await response.json();
+  if (!isImportedRunManifest(value)) throw new Error("Imported run manifest schema is invalid");
 
-  return async (fetcher: typeof fetch = fetch): Promise<ParsedImportedRuns> => {
-    try {
-      const response = await fetcher(IMPORT_MANIFEST_URL, {
-        next: { revalidate: 300, tags: ["melvynx-imports"] }
-      } as RequestInit);
-
-      if (response.status === 404) {
-        return lastKnownGoodRuns === null
-          ? { runs: [], warnings: [] }
-          : refreshFailure();
-      }
-      if (!response.ok) return refreshFailure();
-
-      const value: unknown = await response.json();
-      if (!isImportedRunManifest(value)) return refreshFailure();
-
-      const parsed = parseImportedRunManifest(value);
-      lastKnownGoodRuns = [...parsed.runs];
-      return parsed;
-    } catch {
-      return refreshFailure();
-    }
+  return {
+    ...parseImportedRunManifest(value),
+    refreshedAt: refreshedAt().toISOString()
   };
 }
 
-export const readImportedRuns = createImportedRunsReader();
+export function createImportedRunsReader(
+  readSnapshot: ImportedRunsSnapshotReader,
+  {
+    now = Date.now,
+    staleAfterMs = IMPORT_MANIFEST_STALE_AFTER_MS
+  }: {
+    now?: () => number;
+    staleAfterMs?: number;
+  } = {}
+): ImportedRunsReader {
+  return async (): Promise<ParsedImportedRuns> => {
+    try {
+      const snapshot = await readSnapshot();
+      const refreshedAt = Date.parse(snapshot.refreshedAt);
+      const stale = !Number.isFinite(refreshedAt) || now() - refreshedAt > staleAfterMs;
+      const warnings = [...snapshot.warnings];
+      if (stale && !warnings.includes(IMPORT_MANIFEST_FRESHNESS_WARNING)) {
+        warnings.push(IMPORT_MANIFEST_FRESHNESS_WARNING);
+      }
+      return { runs: snapshot.runs, warnings };
+    } catch {
+      return { runs: [], warnings: [IMPORT_MANIFEST_FRESHNESS_WARNING] };
+    }
+  };
+}

@@ -1,9 +1,9 @@
 import type { NormalizedRun, SyncReport } from "../sources/types";
 import {
   mergeImportedRuns,
-  readImportedRuns,
   type ParsedImportedRuns
 } from "./import-manifest";
+import { readImportedRuns } from "./import-manifest-cache";
 import { readBundledSnapshot, readLocalCache } from "./json-store";
 import { buildTaskCards, buildTaskDetail, resolveComparison, type ComparisonRequest } from "../tasks/view-model";
 
