@@ -3,7 +3,7 @@ import { mergeImportedRuns, readImportedRuns } from "./import-manifest";
 import { readBundledSnapshot, readLocalCache } from "./json-store";
 import { buildTaskCards, buildTaskDetail, resolveComparison, type ComparisonRequest } from "../tasks/view-model";
 
-export type RunFilters = { search?: string; source?: string; model?: string; status?: string; harness?: string; sort?: "cost" | "score" | "date" | "duration" };
+export type RunFilters = { search?: string; model?: string; status?: string; harness?: string; sort?: "cost" | "score" | "date" | "duration" };
 
 export type QueryCache = { runs: NormalizedRun[]; report: SyncReport; freshnessWarnings: string[] };
 
@@ -31,12 +31,19 @@ export async function getDashboardMetrics() {
 
 export async function queryRuns(filters: RunFilters = {}) {
   const { runs } = await getCache(); const query = filters.search?.toLowerCase().trim();
-  const filtered = runs.filter((run) => (!filters.source || run.sourceId === filters.source) && (!filters.model || run.model === filters.model) && (!filters.status || run.status === filters.status) && (!filters.harness || run.harness === filters.harness) && (!query || [run.model, run.task, run.sourceId, run.provider, run.harness].some((value) => value?.toLowerCase().includes(query))));
+  const filtered = runs.filter((run) => (!filters.model || run.model === filters.model) && (!filters.status || run.status === filters.status) && (!filters.harness || run.harness === filters.harness) && (!query || [run.model, run.task, run.provider, run.harness].some((value) => value?.toLowerCase().includes(query))));
   const key = filters.sort === "score" ? "score" : filters.sort === "date" ? "createdAt" : filters.sort === "duration" ? "durationMs" : "totalCostUsd";
   return [...filtered].sort((a, b) => { const av = a[key] ?? -Infinity; const bv = b[key] ?? -Infinity; return typeof av === "string" && typeof bv === "string" ? bv.localeCompare(av) : Number(bv) - Number(av); });
 }
 
-export async function getRunById(id: string) { return (await getCache()).runs.find((run) => run.id === id) ?? null; }
+export function findUniqueRunById(runs: NormalizedRun[], id: string): NormalizedRun | null {
+  const matches = runs.filter((run) => run.id === id);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+export async function getRunById(id: string) {
+  return findUniqueRunById((await getCache()).runs, id);
+}
 
 export async function getTaskCards(query?: string) {
   return buildTaskCards((await getCache()).runs, query);

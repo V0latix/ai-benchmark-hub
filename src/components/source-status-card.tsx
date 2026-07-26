@@ -1,5 +1,0 @@
-"use client";
-import { useState } from "react";
-import type { SourceSyncReport } from "../lib/sources/types";
-
-export function SourceStatusCard({ report, repo }: { report: SourceSyncReport; repo: string }) { const [state, setState] = useState(report); const [busy, setBusy] = useState(false); async function sync() { setBusy(true); const response = await fetch(`/api/sources/${state.sourceId}/sync`, { method: "POST" }); if (response.ok) setState(await response.json()); setBusy(false); } return <article className="rounded-lg border border-slate-800 bg-slate-900/60 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium text-white">{repo}</p><p className="mt-1 text-sm text-slate-400">{state.runCount} runs · {state.status}</p>{state.error && <p className="mt-2 text-sm text-red-300">{state.error}</p>}</div><button className="rounded bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 disabled:opacity-50" disabled={busy} onClick={sync}>{busy ? "Syncing…" : "Sync source"}</button></div></article>; }
