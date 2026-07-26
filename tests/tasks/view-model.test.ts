@@ -124,4 +124,20 @@ describe("resolveComparison", () => {
 
     expect(selection).toMatchObject({ leftId: "gmail-a", rightId: "gmail-b" });
   });
+
+  it("keeps task-scoped colliding runs selectable and marks their global ids as ambiguous", () => {
+    const selection = resolveComparison([
+      run("shared", { task: "gmail-clone", model: "model-a" }),
+      run("safe", { task: "gmail-clone", model: "model-b" }),
+      run("shared", { task: "figma-clone", model: "other-model" })
+    ], { task: "gmail-clone", leftId: "shared", rightId: "safe" });
+
+    expect(selection).toMatchObject({
+      task: "gmail-clone",
+      leftId: "shared",
+      rightId: "safe",
+      ambiguousRunIds: ["shared"]
+    });
+    expect(selection.models.flatMap(({ runs }) => runs).map(({ id }) => id)).toContain("shared");
+  });
 });

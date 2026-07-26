@@ -26,6 +26,7 @@ export type ComparisonSelection = {
   task: string | null;
   leftId: string | null;
   rightId: string | null;
+  ambiguousRunIds: string[];
   tasks: Array<{ task: string; modelCount: number }>;
   models: Array<{ model: string; runs: NormalizedRun[] }>;
   reason: "ready" | "no-tasks" | "not-enough-models";
@@ -142,7 +143,7 @@ export function buildTaskDetail(runs: NormalizedRun[], task: string): TaskDetail
 export function resolveComparison(runs: NormalizedRun[], requested: ComparisonRequest = {}): ComparisonSelection {
   const cards = buildTaskCards(runs);
   const tasks = cards.map(({ task, modelCount }) => ({ task, modelCount }));
-  if (!tasks.length) return { task: null, leftId: null, rightId: null, tasks, models: [], reason: "no-tasks" };
+  if (!tasks.length) return { task: null, leftId: null, rightId: null, ambiguousRunIds: [], tasks, models: [], reason: "no-tasks" };
 
   const task = tasks.find((candidate) => candidate.task === requested.task)?.task ?? tasks[0].task;
   const detail = buildTaskDetail(runs, task)!;
@@ -159,6 +160,7 @@ export function resolveComparison(runs: NormalizedRun[], requested: ComparisonRe
     task,
     leftId: left?.id ?? null,
     rightId: right?.id ?? null,
+    ambiguousRunIds: detail.ambiguousRunIds,
     tasks,
     models,
     reason: left && right ? "ready" : "not-enough-models"

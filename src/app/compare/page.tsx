@@ -1,4 +1,38 @@
-import { CostScoreChart } from "../../components/cost-score-chart";
-import { getModelComparisons } from "../../lib/storage/queries";
+import { CompareWorkbench } from "../../components/compare-workbench";
+import { getComparisonSelection } from "../../lib/storage/queries";
+
 export const dynamic = "force-dynamic";
-export default async function ComparePage() { const comparison = await getModelComparisons(); return <section><h1 className="text-3xl font-semibold text-white">Compare models</h1><div className="mt-6"><CostScoreChart points={comparison.points}/></div><div className="mt-6 overflow-x-auto rounded border border-slate-800"><table className="w-full text-left text-sm"><thead><tr>{["Model", "Runs", "Avg score", "Avg cost", "Avg duration", "Score / cost"].map((label) => <th className="p-3" key={label}>{label}</th>)}</tr></thead><tbody>{comparison.rows.map((row) => <tr className="border-t border-slate-800" key={row.model}><td className="p-3">{row.model}</td><td className="p-3">{row.runs}</td><td className="p-3">{row.score ?? "—"}</td><td className="p-3">{row.cost ?? "—"}</td><td className="p-3">{row.duration ?? "—"}</td><td className="p-3">{comparison.bestValue.find((item) => item.model === row.model)?.value ?? "—"}</td></tr>)}</tbody></table></div></section>; }
+
+type CompareSearchParams = Promise<{
+  task?: string | string[];
+  left?: string | string[];
+  right?: string | string[];
+}>;
+
+function singleValue(value: string | string[] | undefined) {
+  return typeof value === "string" ? value : undefined;
+}
+
+export default async function ComparePage({ searchParams }: { searchParams: CompareSearchParams }) {
+  const params = await searchParams;
+  const selection = await getComparisonSelection({
+    task: singleValue(params.task),
+    leftId: singleValue(params.left),
+    rightId: singleValue(params.right)
+  });
+
+  return (
+    <section>
+      <header className="mb-8 max-w-3xl">
+        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">Comparaison task-scoped</p>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">
+          Comparez deux runs, sur la même tâche.
+        </h1>
+        <p className="mt-3 text-base leading-7 text-[var(--text-muted)]">
+          Alternez entre deux résultats en plein format, puis alignez leurs détails et leurs artefacts source.
+        </p>
+      </header>
+      <CompareWorkbench selection={selection} />
+    </section>
+  );
+}
