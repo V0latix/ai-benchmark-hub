@@ -77,9 +77,17 @@ export function parseImportedRunManifest(value: unknown): ParsedImportedRuns {
 }
 
 export function mergeImportedRuns(bundled: NormalizedRun[], imported: NormalizedRun[]): NormalizedRun[] {
-  const runsById = new Map(bundled.map((run) => [run.id, run]));
-  for (const run of imported) runsById.set(run.id, run);
-  return [...runsById.values()];
+  const merged = [...bundled];
+  const knownIdentities = new Set(bundled.map((run) => JSON.stringify([run.task, run.id])));
+
+  for (const run of imported) {
+    const identity = JSON.stringify([run.task, run.id]);
+    if (knownIdentities.has(identity)) continue;
+    merged.push(run);
+    knownIdentities.add(identity);
+  }
+
+  return merged;
 }
 
 export async function readImportedRuns(fetcher: typeof fetch = fetch): Promise<ParsedImportedRuns> {

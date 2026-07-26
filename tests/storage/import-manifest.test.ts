@@ -11,10 +11,18 @@ describe("import manifest", () => {
     expect(parsed.warnings).toEqual(["Skipped invalid imported run at index 1"]);
   });
 
-  it("lets an imported run replace a bundled run with the same stable id", () => {
-    expect(mergeImportedRuns(
-      [makeNormalizedRun("same", { task: "old-task" })],
-      [makeNormalizedRun("same", { task: "new-task" })]
-    )[0].task).toBe("new-task");
+  it("keeps the bundled run on an exact task-qualified identity collision", () => {
+    const bundled = makeNormalizedRun("same", { task: "same-task", model: "bundled-model" });
+    const imported = makeNormalizedRun("same", { task: "same-task", model: "imported-model" });
+
+    expect(mergeImportedRuns([bundled], [imported])).toEqual([bundled]);
+  });
+
+  it("preserves bundled order and appends imported runs with new task-qualified identities", () => {
+    const first = makeNormalizedRun("shared", { task: "first-task" });
+    const second = makeNormalizedRun("shared", { task: "second-task" });
+    const imported = makeNormalizedRun("shared", { task: "third-task" });
+
+    expect(mergeImportedRuns([first, second], [imported])).toEqual([first, second, imported]);
   });
 });
