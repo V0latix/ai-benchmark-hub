@@ -143,30 +143,30 @@ function verifyReceipts(
 }
 
 function assertNoImmutableCollision(
-  existing: Array<{ path: string }>,
-  candidateEntries: GitTreeEntry[],
-  artifactRoot: string,
-  runRoot: string
+  existing: Array<{ path: string; type: string }>,
+  candidatePaths: string[]
 ): void {
-  const artifactKey = artifactRoot.toLocaleLowerCase("en-US");
-  const runKey = runRoot.toLocaleLowerCase("en-US");
-  const existingKeys = existing.map((entry) => entry.path.normalize("NFC").toLocaleLowerCase("en-US"));
+  const existingEntries = existing.map((entry) => ({
+    path: entry.path.normalize("NFC").toLocaleLowerCase("en-US"),
+    type: entry.type
+  }));
+  const candidates = candidatePaths.map((path) => path.normalize("NFC").toLocaleLowerCase("en-US"));
 
-  if (existingKeys.some((path) => (
-    path === artifactKey
-    || path.startsWith(`${artifactKey}/`)
-    || path === runKey
-    || path.startsWith(`${runKey}/`)
-  ))) {
-    throw new Error("Import path collision on immutable main content");
+  for (const candidate of candidates) {
+    for (const entry of existingEntries) {
+      const exactCollision = entry.path === candidate;
+      const blobAncestor = candidate.startsWith(`${entry.path}/`) && entry.type !== "tree";
+      const existingDescendant = entry.path.startsWith(`${candidate}/`);
+      if (exactCollision || blobAncestor || existingDescendant) {
+        throw new Error("Import path collision on immutable main content");
+      }
+    }
   }
+}
 
-  const candidates = candidateEntries.map((entry) => entry.path.toLocaleLowerCase("en-US"));
-  if (candidates.some((candidate) => existingKeys.some((path) => (
-    path === candidate || path.startsWith(`${candidate}/`) || candidate.startsWith(`${path}/`)
-  )))) {
-    throw new Error("Import path collision on immutable main content");
-  }
+function belongsToDraft(branch: string, draftId: string): boolean {
+  const match = staleBranchPattern.exec(branch);
+  return match?.[2] === draftId;
 }
 
 function metadataBytes(metadata: NormalizedDraftMetadata): Uint8Array {
@@ -251,9 +251,14 @@ export async function finalizeDraft(
     sha: receipt.blobSha
   }));
 
+  const importBranches = await writer.listBranches("imports/");
+  if (importBranches.some((branch) => belongsToDraft(branch, input.draftId))) {
+    throw new Error("Import draft was already finalized");
+  }
+
   const mainHead = await writer.getHead("main");
   const existing = await writer.listTree(mainHead.commitSha);
-  assertNoImmutableCollision(existing, artifactEntries, artifactRoot, runRoot);
+  assertNoImmutableCollision(existing, [...artifactEntries.map((entry) => entry.path), metadataPath]);
 
   const metadataSha = await writer.createBlob(metadataBytes(metadata));
   const entries: GitTreeEntry[] = [

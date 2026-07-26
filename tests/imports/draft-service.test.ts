@@ -156,14 +156,39 @@ describe("import draft service", () => {
     )).rejects.toThrow(/Vite entry/i);
   });
 
-  it("rejects an existing run or application root on main instead of replacing immutable paths", async () => {
-    for (const existingPath of [
-      "benchmarks/gmail-clone/2026-07-26-lmarena-model-a/old.js",
-      "runs/20260726T120000Z-model-a-lmarena/data/other/metadata.json",
-      "BENCHMARKS/GMAIL-CLONE/2026-07-26-LMARENA-MODEL-A/index.html"
-    ]) {
+  it("allows recursive ancestor trees while preserving unrelated immutable blobs", async () => {
+    const writer = new InMemoryGitWriter();
+    writer.treeEntries.set("main-commit", [
+      { path: "benchmarks", type: "tree", sha: "1".repeat(40) },
+      { path: "benchmarks/gmail-clone", type: "tree", sha: "2".repeat(40) },
+      { path: "benchmarks/gmail-clone/2026-07-26-lmarena-model-a", type: "tree", sha: "3".repeat(40) },
+      { path: "benchmarks/gmail-clone/an-existing-app", type: "tree", sha: "4".repeat(40) },
+      { path: "benchmarks/gmail-clone/an-existing-app/index.html", type: "blob", sha: "5".repeat(40) },
+      { path: "runs", type: "tree", sha: "6".repeat(40) },
+      { path: "runs/20260726T120000Z-model-a-lmarena", type: "tree", sha: "7".repeat(40) },
+      { path: "runs/an-existing-run", type: "tree", sha: "8".repeat(40) },
+      { path: "runs/an-existing-run/data/gmail-clone/metadata.json", type: "blob", sha: "9".repeat(40) }
+    ]);
+
+    await expect(finalizeDraft(
+      { metadata, receipts: [receipt()], draftId: DRAFT_ID },
+      writer,
+      SECRET,
+      { now: NOW }
+    )).resolves.toMatchObject({ draftId: DRAFT_ID });
+  });
+
+  it("rejects exact candidates, blob ancestors, and descendants beneath a candidate path", async () => {
+    const collisions = [
+      { path: "BENCHMARKS/GMAIL-CLONE/2026-07-26-LMARENA-MODEL-A/index.html", type: "blob" },
+      { path: "benchmarks/gmail-clone/2026-07-26-lmarena-model-a/index.html", type: "tree" },
+      { path: "benchmarks/gmail-clone/2026-07-26-lmarena-model-a", type: "blob" },
+      { path: "benchmarks/gmail-clone/2026-07-26-lmarena-model-a/index.html/old.txt", type: "blob" },
+      { path: "runs/20260726T120000Z-model-a-lmarena/data/gmail-clone/metadata.json", type: "blob" }
+    ];
+    for (const collision of collisions) {
       const writer = new InMemoryGitWriter();
-      writer.treeEntries.set("main-commit", [{ path: existingPath, type: "blob", sha: "d".repeat(40) }]);
+      writer.treeEntries.set("main-commit", [{ ...collision, sha: "d".repeat(40) }]);
 
       await expect(finalizeDraft(
         { metadata, receipts: [receipt()], draftId: DRAFT_ID },
@@ -176,21 +201,31 @@ describe("import draft service", () => {
     }
   });
 
-  it("checks collisions on the exact main commit used as the draft parent", async () => {
+  it("rejects replay after time advances without creating another branch or commit", async () => {
     const writer = new InMemoryGitWriter();
-    writer.treeEntries.set("main-commit", [{
-      path: "benchmarks/gmail-clone/2026-07-26-lmarena-model-a/index.html",
-      type: "blob",
-      sha: "d".repeat(40)
-    }]);
+    const input = { metadata, receipts: [receipt()], draftId: DRAFT_ID };
+    await finalizeDraft(input, writer, SECRET, { now: NOW });
+    const commitsAfterFirstFinalize = writer.commits.length;
 
-    await expect(finalizeDraft(
-      { metadata, receipts: [receipt()], draftId: DRAFT_ID },
-      writer,
-      SECRET,
-      { now: NOW }
-    )).rejects.toThrow(/collision/i);
-    expect(writer.commits).toHaveLength(0);
+    await expect(finalizeDraft(input, writer, SECRET, { now: NOW + 60_000 }))
+      .rejects.toThrow(/already finalized|draft/i);
+    expect([...writer.refs.keys()].filter((branch) => branch.startsWith("imports/"))).toHaveLength(1);
+    expect(writer.commits).toHaveLength(commitsAfterFirstFinalize);
+  });
+
+  it("fails closed on a concurrent deterministic branch claim even when the ref listing is stale", async () => {
+    class StaleBranchListingWriter extends InMemoryGitWriter {
+      override async listBranches(): Promise<string[]> {
+        return [];
+      }
+    }
+    const writer = new StaleBranchListingWriter();
+    const input = { metadata, receipts: [receipt()], draftId: DRAFT_ID };
+    const first = await finalizeDraft(input, writer, SECRET, { now: NOW });
+
+    await expect(finalizeDraft(input, writer, SECRET, { now: NOW }))
+      .rejects.toThrow(/already exists/i);
+    expect([...writer.refs.keys()].filter((branch) => branch.startsWith("imports/"))).toEqual([first.branch]);
   });
 
   it("creates upload authority from 128 injected random bits and treats stale cleanup as best effort", async () => {
