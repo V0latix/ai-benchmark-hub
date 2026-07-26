@@ -68,7 +68,8 @@ describe("GitHubBenchmarkWriter", () => {
       expect(call.init?.headers).toMatchObject({
         Authorization: "Bearer test-token",
         Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2026-03-10"
+        "X-GitHub-Api-Version": "2026-03-10",
+        "Content-Type": "application/json"
       });
     }
   });
@@ -79,7 +80,7 @@ describe("GitHubBenchmarkWriter", () => {
       response({ tree: { sha: "tree-sha" } }),
       response([{ ref: "refs/heads/imports/1234567890-abcdefghij" }, { ref: "refs/heads/imports/not-valid" }]),
       response({ content: "aMOpbGxv", encoding: "base64" }),
-      response({ tree: [{ path: "index.html", type: "blob", sha: "blob-sha" }] })
+      response({ truncated: false, tree: [{ path: "index.html", type: "blob", sha: "blob-sha" }] })
     ]);
     const writer = new GitHubBenchmarkWriter("test-token", github.fetcher as typeof fetch);
 
@@ -95,6 +96,31 @@ describe("GitHubBenchmarkWriter", () => {
       "https://api.github.com/repos/Melvynx/benchmarks/contents/imports/index.json?ref=main",
       "https://api.github.com/repos/Melvynx/benchmarks/git/trees/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?recursive=1"
     ]);
+  });
+
+  it("rejects a truncated recursive tree instead of accepting an incomplete collision check", async () => {
+    const github = fakeGitHub([response({
+      truncated: true,
+      tree: [{ path: "index.html", type: "blob", sha: "blob-sha" }]
+    })]);
+    const writer = new GitHubBenchmarkWriter("test-token", github.fetcher as typeof fetch);
+
+    await expect(writer.listTree("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+      .rejects.toThrow("GitHub response was invalid");
+  });
+
+  it("rejects every malformed recursive tree entry instead of silently omitting it", async () => {
+    const github = fakeGitHub([response({
+      truncated: false,
+      tree: [
+        { path: "index.html", type: "blob", sha: "blob-sha" },
+        { path: "hidden.json", type: "blob" }
+      ]
+    })]);
+    const writer = new GitHubBenchmarkWriter("test-token", github.fetcher as typeof fetch);
+
+    await expect(writer.listTree("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+      .rejects.toThrow("GitHub response was invalid");
   });
 
   it("rejects untrusted refs and paths before making a request", async () => {
@@ -148,15 +174,52 @@ describe("InMemoryGitWriter", () => {
     const blobSha = await writer.createBlob(new Uint8Array([104, 105]));
     const treeSha = await writer.createTree("main-tree", [{ path: "index.html", mode: "100644", type: "blob", sha: blobSha }]);
     const commitSha = await writer.createCommit("draft", treeSha, "main-commit");
+    const nextCommitSha = await writer.createCommit("draft update", treeSha, commitSha);
     await writer.createBranch("imports/1234567890-abcdefghij", commitSha);
-    await writer.updateBranch("imports/1234567890-abcdefghij", "next-commit");
+    await writer.updateBranch("imports/1234567890-abcdefghij", nextCommitSha);
     await writer.deleteBranch("imports/1234567890-abcdefghij");
 
     expect(writer.blobs.get(blobSha)).toEqual(new Uint8Array([104, 105]));
     expect(writer.createdTreeEntries).toEqual([{ path: "index.html", mode: "100644", type: "blob", sha: blobSha }]);
     expect(writer.commits).toContainEqual({ sha: commitSha, message: "draft", treeSha, parentSha: "main-commit" });
     expect(writer.refs.get("imports/1234567890-abcdefghij")).toBeUndefined();
-    expect(writer.updateAttempts).toEqual([{ branch: "imports/1234567890-abcdefghij", commitSha: "next-commit", force: false }]);
+    expect(writer.updateAttempts).toEqual([{ branch: "imports/1234567890-abcdefghij", commitSha: nextCommitSha, force: false }]);
+    expect(writer.forcedUpdates).toBe(0);
+  });
+
+  it("rejects unsafe branches, refs, repository paths, and tree entries like the GitHub writer", async () => {
+    const writer = new InMemoryGitWriter();
+
+    await expect(writer.getHead("refs/heads/main")).rejects.toThrow("Unsafe Git ref");
+    await expect(writer.createBranch("main", "main-commit")).rejects.toThrow("Unsafe import branch");
+    await expect(writer.updateBranch("refs/heads/main", "main-commit")).rejects.toThrow("Unsafe Git branch");
+    await expect(writer.deleteBranch("main")).rejects.toThrow("Unsafe import branch");
+    await expect(writer.listBranches("main")).rejects.toThrow("Unsafe branch prefix");
+    await expect(writer.readText("../.env", "main")).rejects.toThrow("Unsafe repository path");
+    await expect(writer.listTree("refs/heads/main")).rejects.toThrow("Unsafe Git ref");
+    await expect(writer.createTree("main-tree", [{
+      path: "../hidden.json",
+      mode: "100644",
+      type: "blob",
+      sha: "blob-sha"
+    }])).rejects.toThrow("Unsafe Git tree entry");
+  });
+
+  it("rejects non-fast-forward and forced branch updates", async () => {
+    const writer = new InMemoryGitWriter();
+    const treeSha = await writer.createTree("main-tree", []);
+    const currentCommitSha = await writer.createCommit("current", treeSha, "main-commit");
+    const unrelatedCommitSha = await writer.createCommit("unrelated", treeSha, "main-commit");
+    const branch = "imports/1234567890-abcdefghij";
+    await writer.createBranch(branch, currentCommitSha);
+
+    await expect(writer.updateBranch(branch, unrelatedCommitSha)).rejects.toThrow("Non-fast-forward update");
+    await expect((writer.updateBranch as unknown as (
+      branch: string,
+      commitSha: string,
+      force: boolean
+    ) => Promise<void>)(branch, unrelatedCommitSha, true)).rejects.toThrow("Forced updates are forbidden");
+    expect(writer.refs.get(branch)).toBe(currentCommitSha);
     expect(writer.forcedUpdates).toBe(0);
   });
 });

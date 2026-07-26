@@ -30,7 +30,7 @@ type GitCommitResponse = { tree?: { sha?: unknown } };
 type ShaResponse = { sha?: unknown };
 type MatchingRefResponse = Array<{ ref?: unknown }>;
 type ContentResponse = { content?: unknown; encoding?: unknown };
-type TreeResponse = { tree?: Array<{ path?: unknown; type?: unknown; sha?: unknown }> };
+type TreeResponse = { truncated?: unknown; tree?: Array<{ path?: unknown; type?: unknown; sha?: unknown }> };
 
 function encodePath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
@@ -51,6 +51,23 @@ function isSafeReadRef(ref: string): boolean {
 function isSafeUpdateBranch(branch: string): boolean {
   return branch === "main" || importBranch.test(branch);
 }
+
+function isSafeTreeEntry(entry: GitTreeEntry): boolean {
+  return isSafeRepositoryPath(entry.path)
+    && entry.mode === "100644"
+    && entry.type === "blob"
+    && typeof entry.sha === "string"
+    && entry.sha.length > 0;
+}
+
+export const benchmarkGitWriterValidators = Object.freeze({
+  branchPrefix: (prefix: string) => prefix === "imports/",
+  importBranch: (branch: string) => importBranch.test(branch),
+  readRef: isSafeReadRef,
+  repositoryPath: isSafeRepositoryPath,
+  treeEntry: isSafeTreeEntry,
+  updateBranch: isSafeUpdateBranch
+});
 
 function requiredSha(value: unknown): string {
   if (typeof value !== "string" || value.length === 0) throw new Error("GitHub response was invalid");
@@ -92,7 +109,7 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
 
   async createTree(baseTreeSha: string, entries: GitTreeEntry[]): Promise<string> {
     for (const entry of entries) {
-      if (!isSafeRepositoryPath(entry.path) || entry.mode !== "100644" || entry.type !== "blob" || !entry.sha) {
+      if (!benchmarkGitWriterValidators.treeEntry(entry)) {
         throw new Error("Unsafe Git tree entry");
       }
     }
@@ -112,7 +129,7 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
   }
 
   async createBranch(branch: string, commitSha: string): Promise<void> {
-    if (!importBranch.test(branch)) throw new Error("Unsafe import branch");
+    if (!benchmarkGitWriterValidators.importBranch(branch)) throw new Error("Unsafe import branch");
     await this.json("/git/refs", {
       method: "POST",
       body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commitSha })
@@ -120,7 +137,7 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
   }
 
   async updateBranch(branch: string, commitSha: string): Promise<void> {
-    if (!isSafeUpdateBranch(branch)) throw new Error("Unsafe Git branch");
+    if (!benchmarkGitWriterValidators.updateBranch(branch)) throw new Error("Unsafe Git branch");
     await this.json(`/git/refs/heads/${encodePath(branch)}`, {
       method: "PATCH",
       body: JSON.stringify({ sha: commitSha, force: false })
@@ -128,23 +145,23 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
   }
 
   async deleteBranch(branch: string): Promise<void> {
-    if (!importBranch.test(branch)) throw new Error("Unsafe import branch");
+    if (!benchmarkGitWriterValidators.importBranch(branch)) throw new Error("Unsafe import branch");
     await this.request(`/git/refs/heads/${encodePath(branch)}`, { method: "DELETE" });
   }
 
   async listBranches(prefix: string): Promise<string[]> {
-    if (prefix !== "imports/") throw new Error("Unsafe branch prefix");
+    if (!benchmarkGitWriterValidators.branchPrefix(prefix)) throw new Error("Unsafe branch prefix");
     const refs = await this.json<MatchingRefResponse>(`/git/matching-refs/heads/${encodePath(prefix)}`);
     if (!Array.isArray(refs)) throw new Error("GitHub response was invalid");
     return refs.flatMap((entry) => {
       if (typeof entry.ref !== "string" || !entry.ref.startsWith("refs/heads/")) return [];
       const branch = entry.ref.slice("refs/heads/".length);
-      return importBranch.test(branch) ? [branch] : [];
+      return benchmarkGitWriterValidators.importBranch(branch) ? [branch] : [];
     });
   }
 
   async readText(path: string, ref: string): Promise<string | null> {
-    if (!isSafeRepositoryPath(path)) throw new Error("Unsafe repository path");
+    if (!benchmarkGitWriterValidators.repositoryPath(path)) throw new Error("Unsafe repository path");
     this.assertReadRef(ref);
     const response = await this.request(`/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`);
     if (response.status === 404) return null;
@@ -156,16 +173,21 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
   async listTree(ref: string): Promise<Array<{ path: string; type: string; sha: string }>> {
     this.assertReadRef(ref);
     const body = await this.json<TreeResponse>(`/git/trees/${encodeURIComponent(ref)}?recursive=1`);
-    if (!Array.isArray(body.tree)) throw new Error("GitHub response was invalid");
-    return body.tree.flatMap((entry) => (
-      typeof entry.path === "string" && typeof entry.type === "string" && typeof entry.sha === "string"
-        ? [{ path: entry.path, type: entry.type, sha: entry.sha }]
-        : []
-    ));
+    if (body.truncated !== false || !Array.isArray(body.tree)) throw new Error("GitHub response was invalid");
+    return body.tree.map((entry) => {
+      if (
+        typeof entry.path !== "string" || !benchmarkGitWriterValidators.repositoryPath(entry.path)
+        || typeof entry.type !== "string" || entry.type.length === 0
+        || typeof entry.sha !== "string" || entry.sha.length === 0
+      ) {
+        throw new Error("GitHub response was invalid");
+      }
+      return { path: entry.path, type: entry.type, sha: entry.sha };
+    });
   }
 
   private assertReadRef(ref: string): void {
-    if (!isSafeReadRef(ref)) throw new Error("Unsafe Git ref");
+    if (!benchmarkGitWriterValidators.readRef(ref)) throw new Error("Unsafe Git ref");
   }
 
   private headers(): HeadersInit {
@@ -179,7 +201,10 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
   private async request(path: string, init: RequestInit = {}): Promise<Response> {
     let response: Response;
     try {
-      response = await this.fetcher(`${API_ROOT}${path}`, { ...init, headers: this.headers() });
+      const headers = init.body === undefined
+        ? this.headers()
+        : { ...this.headers(), "Content-Type": "application/json" };
+      response = await this.fetcher(`${API_ROOT}${path}`, { ...init, headers });
     } catch {
       throw new Error("GitHub request failed");
     }

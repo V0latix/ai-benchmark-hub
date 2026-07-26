@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-import type { BenchmarkGitWriter, GitTreeEntry } from "../../src/lib/github/write-client";
+import {
+  benchmarkGitWriterValidators,
+  type BenchmarkGitWriter,
+  type GitTreeEntry
+} from "../../src/lib/github/write-client";
 
 type StoredTree = { baseTreeSha: string; entries: GitTreeEntry[] };
 
@@ -35,6 +39,7 @@ export class InMemoryGitWriter implements BenchmarkGitWriter {
   }
 
   async getHead(ref: string): Promise<{ commitSha: string; treeSha: string }> {
+    if (!benchmarkGitWriterValidators.readRef(ref)) throw new Error("Unsafe Git ref");
     const commitSha = this.refs.get(ref);
     if (!commitSha) throw new Error(`Unknown ref: ${ref}`);
     return { commitSha, treeSha: this.commitTrees.get(commitSha) ?? "main-tree" };
@@ -48,6 +53,7 @@ export class InMemoryGitWriter implements BenchmarkGitWriter {
   }
 
   async createTree(baseTreeSha: string, entries: GitTreeEntry[]): Promise<string> {
+    if (!entries.every(benchmarkGitWriterValidators.treeEntry)) throw new Error("Unsafe Git tree entry");
     const copy = entries.map((entry) => ({ ...entry }));
     const sha = createHash("sha1").update(JSON.stringify({ baseTreeSha, entries: copy })).digest("hex");
     this.trees.set(sha, { baseTreeSha, entries: copy });
@@ -63,37 +69,69 @@ export class InMemoryGitWriter implements BenchmarkGitWriter {
   }
 
   async createBranch(branch: string, commitSha: string): Promise<void> {
+    if (!benchmarkGitWriterValidators.importBranch(branch)) throw new Error("Unsafe import branch");
     if (this.refs.has(branch)) throw new Error(`Branch already exists: ${branch}`);
     this.refs.set(branch, commitSha);
   }
 
-  async updateBranch(branch: string, commitSha: string): Promise<void> {
+  async updateBranch(branch: string, commitSha: string, force = false): Promise<void> {
+    if (force) throw new Error("Forced updates are forbidden");
+    if (!benchmarkGitWriterValidators.updateBranch(branch)) throw new Error("Unsafe Git branch");
     this.updateAttempts.push({ branch, commitSha, force: false });
     if (branch === "main" && this.failFirstMainUpdate && this.mainUpdateFailures++ === 0) {
       throw new Error("GitHub request failed (422)");
     }
+    const currentCommitSha = this.refs.get(branch);
+    if (!currentCommitSha) throw new Error(`Unknown ref: ${branch}`);
+    if (!this.isDescendantOf(commitSha, currentCommitSha)) throw new Error("Non-fast-forward update");
     this.refs.set(branch, commitSha);
   }
 
   async deleteBranch(branch: string): Promise<void> {
+    if (!benchmarkGitWriterValidators.importBranch(branch)) throw new Error("Unsafe import branch");
     this.refs.delete(branch);
   }
 
   async listBranches(prefix: string): Promise<string[]> {
-    return [...this.refs.keys()].filter((branch) => branch.startsWith(prefix));
+    if (!benchmarkGitWriterValidators.branchPrefix(prefix)) throw new Error("Unsafe branch prefix");
+    return [...this.refs.keys()].filter(benchmarkGitWriterValidators.importBranch);
   }
 
   async readText(path: string, ref: string): Promise<string | null> {
+    if (!benchmarkGitWriterValidators.repositoryPath(path)) throw new Error("Unsafe repository path");
+    if (!benchmarkGitWriterValidators.readRef(ref)) throw new Error("Unsafe Git ref");
     return this.textFiles.get(`${ref}:${path}`) ?? this.textFiles.get(path) ?? null;
   }
 
   async listTree(ref: string): Promise<Array<{ path: string; type: string; sha: string }>> {
+    if (!benchmarkGitWriterValidators.readRef(ref)) throw new Error("Unsafe Git ref");
     const commitSha = this.refs.get(ref) ?? ref;
     const treeSha = this.commitTrees.get(commitSha);
     if (treeSha) {
       const tree = this.trees.get(treeSha);
       if (tree) return tree.entries.map(({ path, type, sha }) => ({ path, type, sha }));
     }
-    return this.treeEntries.get(ref) ?? [];
+    const entries = this.treeEntries.get(ref) ?? [];
+    if (entries.some((entry) => (
+      !benchmarkGitWriterValidators.repositoryPath(entry.path)
+      || typeof entry.type !== "string" || entry.type.length === 0
+      || typeof entry.sha !== "string" || entry.sha.length === 0
+    ))) {
+      throw new Error("Invalid in-memory tree entry");
+    }
+    return entries.map((entry) => ({ ...entry }));
+  }
+
+  private isDescendantOf(commitSha: string, ancestorSha: string): boolean {
+    let candidateSha = commitSha;
+    const visited = new Set<string>();
+    while (candidateSha !== ancestorSha) {
+      if (visited.has(candidateSha)) return false;
+      visited.add(candidateSha);
+      const commit = this.commits.find((entry) => entry.sha === candidateSha);
+      if (!commit) return false;
+      candidateSha = commit.parentSha;
+    }
+    return true;
   }
 }
