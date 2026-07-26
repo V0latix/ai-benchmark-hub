@@ -18,9 +18,41 @@ describe("import file policy", () => {
       validateImportFile({
         path: "assets/logo.png",
         bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
-        contentType: "text/plain"
+        contentType: "image/png"
       })
     ).toMatchObject({ path: "assets/logo.png", contentType: "image/png", text: false });
+  });
+
+  it.each([
+    ["assets/photo.jpg", new Uint8Array([0xff, 0xd8, 0xff])],
+    ["assets/animation.gif", text("GIF89a")],
+    ["assets/photo.webp", text("RIFF\u0000\u0000\u0000\u0000WEBP")],
+    ["assets/photo.avif", new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66])],
+    ["assets/site.woff", text("wOFF")],
+    ["assets/site.woff2", text("wOF2")]
+  ])("accepts valid binary magic for %s", (path, bytes) => {
+    expect(validateImportFile({ path: path as string, bytes: bytes as Uint8Array, contentType: "application/octet-stream" }))
+      .toMatchObject({ path, text: false });
+  });
+
+  it("rejects a conflicting declared content type instead of trusting it", () => {
+    expect(() => validateImportFile({
+      path: "assets/logo.png",
+      bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+      contentType: "text/html"
+    })).toThrow(/content type/i);
+  });
+
+  it("rejects arbitrary, archive, and secret bytes renamed as an allowed image", () => {
+    for (const bytes of [
+      text("not really a PNG"),
+      new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+      new Uint8Array([0x1f, 0x8b, 0x08, 0x00]),
+      text("-----BEGIN PRIVATE KEY-----\nabc")
+    ]) {
+      expect(() => validateImportFile({ path: "assets/logo.png", bytes, contentType: "image/png" }))
+        .toThrow(/signature|archive|private key|secret/i);
+    }
   });
 
   it.each(["../escape.js", "/absolute.js", "C:\\drive.js", "assets\\app.js", "./index.html", "assets/../index.html", "assets//app.js", "nul\u0000.js"]) (

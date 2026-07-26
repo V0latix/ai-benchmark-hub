@@ -1,4 +1,4 @@
-import { unzip } from "fflate";
+import { Unzip, UnzipInflate } from "fflate";
 
 import { importPathKey, normalizeImportPath, validateImportFile } from "./policy";
 import { IMPORT_LIMITS, type ArchiveInspection, type ImportProjectType, type ValidatedImportFile } from "./types";
@@ -7,6 +7,8 @@ type ZipEntry = {
   path: string;
   compressedBytes: number;
   expandedBytes: number;
+  crc32: number;
+  compression: number;
   directory: boolean;
 };
 
@@ -15,6 +17,22 @@ const endOfCentralDirectorySignature = 0x06054b50;
 const zip64Sentinel = 0xffff;
 const zip64OffsetSentinel = 0xffffffff;
 const supportedCompressionMethods = new Set([0, 8]);
+const extractionChunkBytes = 1_024;
+const crc32Table = new Uint32Array(256);
+
+for (let index = 0; index < crc32Table.length; index += 1) {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) value = (value & 1) ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  crc32Table[index] = value >>> 0;
+}
+
+class ArchiveExtractionError extends Error {}
+
+function updateCrc32(state: number, bytes: Uint8Array) {
+  let value = state;
+  for (const byte of bytes) value = crc32Table[(value ^ byte) & 0xff] ^ (value >>> 8);
+  return value >>> 0;
+}
 
 function findEndOfCentralDirectory(data: Uint8Array) {
   const minimumOffset = Math.max(0, data.length - 65_557);
@@ -51,11 +69,10 @@ function readZipEntries(data: Uint8Array): ZipEntry[] {
 
   if (disk !== 0 || centralDisk !== 0 || entriesOnDisk !== entryCount) throw new Error("Multi-disk ZIP archives are not allowed");
   if (entryCount === zip64Sentinel || centralOffset === zip64OffsetSentinel) throw new Error("ZIP64 archives are not allowed");
-  if (entryCount > IMPORT_LIMITS.fileCount) throw new Error("Archive exceeds the 1,000 files limit");
-
   const entries: ZipEntry[] = [];
   let offset = centralOffset;
   let expandedBytes = 0;
+  let fileCount = 0;
   for (let index = 0; index < entryCount; index += 1) {
     if (offset + 46 > endOffset || view.getUint32(offset, true) !== centralDirectorySignature) {
       throw new Error("Archive central directory is malformed");
@@ -64,6 +81,7 @@ function readZipEntries(data: Uint8Array): ZipEntry[] {
     const versionMadeBy = view.getUint16(offset + 4, true);
     const flags = view.getUint16(offset + 8, true);
     const compressionMethod = view.getUint16(offset + 10, true);
+    const crc32 = view.getUint32(offset + 16, true);
     const compressedBytes = view.getUint32(offset + 20, true);
     const fileExpandedBytes = view.getUint32(offset + 24, true);
     const pathLength = view.getUint16(offset + 28, true);
@@ -84,17 +102,19 @@ function readZipEntries(data: Uint8Array): ZipEntry[] {
     }
 
     const safePath = directory ? normalizeDirectoryPath(path) : normalizeImportPath(path);
+    if (directory && fileExpandedBytes !== 0) throw new Error(`Directory ZIP entry contains file data: ${safePath}`);
+    if (!directory && ++fileCount > IMPORT_LIMITS.fileCount) throw new Error("Archive exceeds the 1,000 files limit");
     if (!directory && fileExpandedBytes > IMPORT_LIMITS.fileBytes) {
       throw new Error(`Import file exceeds the 3 MB limit: ${safePath}`);
     }
-    expandedBytes += fileExpandedBytes;
+    if (!directory) expandedBytes += fileExpandedBytes;
     if (expandedBytes > IMPORT_LIMITS.expandedBytes) throw new Error("Archive exceeds the 75 MB expanded limit");
-    entries.push({ path: safePath, compressedBytes, expandedBytes: fileExpandedBytes, directory });
+    entries.push({ path: safePath, compressedBytes, expandedBytes: fileExpandedBytes, crc32, compression: compressionMethod, directory });
     offset = nextOffset;
   }
 
   for (const entry of entries) {
-    if (entry.expandedBytes > 1_000_000 && (entry.compressedBytes === 0 || entry.expandedBytes / entry.compressedBytes > 100)) {
+    if (!entry.directory && entry.expandedBytes > 1_000_000 && (entry.compressedBytes === 0 || entry.expandedBytes / entry.compressedBytes > 100)) {
       throw new Error(`Archive has an unsafe compression ratio: ${entry.path}`);
     }
   }
@@ -107,23 +127,122 @@ function normalizeDirectoryPath(path: string) {
   return normalizeImportPath(path.slice(0, -1));
 }
 
-function unzipArchive(data: Uint8Array): Promise<Record<string, Uint8Array>> {
-  return new Promise((resolve, reject) => {
-    unzip(data, (error, files) => {
-      if (error) reject(new Error("Archive could not be extracted safely"));
-      else resolve(files);
-    });
-  });
+type ExtractedFile = { path: string; bytes: Uint8Array };
+
+function entryKey(path: string, directory: boolean) {
+  return `${directory ? "directory" : "file"}:${path}`;
 }
 
-function stripCommonRoot(files: Record<string, Uint8Array>) {
-  const paths = Object.keys(files);
+function concatenateChunks(chunks: Uint8Array[], size: number) {
+  const output = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}
+
+function streamArchive(data: Uint8Array, entries: ZipEntry[]): ExtractedFile[] {
+  const expected = new Map<string, ZipEntry>();
+  for (const entry of entries) {
+    const key = entryKey(entry.path, entry.directory);
+    if (expected.has(key)) throw new Error(`Duplicate ZIP entry: ${entry.path}`);
+    expected.set(key, entry);
+  }
+
+  const seen = new Set<string>();
+  const extracted: ExtractedFile[] = [];
+  let emittedBytes = 0;
+  let emittedFiles = 0;
+
+  const unzipper = new Unzip((file) => {
+    const directory = file.name.endsWith("/");
+    const path = directory ? normalizeDirectoryPath(file.name) : normalizeImportPath(file.name);
+    const key = entryKey(path, directory);
+    const metadata = expected.get(key);
+    if (!metadata || seen.has(key)) throw new ArchiveExtractionError(`Archive entry metadata mismatch: ${path}`);
+    seen.add(key);
+
+    if (file.compression !== metadata.compression) {
+      throw new ArchiveExtractionError(`Archive compression metadata mismatch: ${path}`);
+    }
+    if (file.size !== undefined && file.size !== metadata.compressedBytes) {
+      throw new ArchiveExtractionError(`Archive compressed-size mismatch: ${path}`);
+    }
+    if (file.originalSize !== undefined && file.originalSize !== metadata.expandedBytes) {
+      throw new ArchiveExtractionError(`Archive expanded-size mismatch: ${path}`);
+    }
+    if (!directory && ++emittedFiles > IMPORT_LIMITS.fileCount) {
+      file.terminate();
+      throw new ArchiveExtractionError("Archive exceeds the 1,000 files limit");
+    }
+
+    const chunks: Uint8Array[] = [];
+    let fileBytes = 0;
+    let crcState = 0xffffffff;
+    file.ondata = (error, chunk, final) => {
+      if (error) {
+        file.terminate();
+        if (error instanceof ArchiveExtractionError) throw error;
+        throw new ArchiveExtractionError(`Archive is corrupt or truncated: ${path}`);
+      }
+
+      fileBytes += chunk.byteLength;
+      emittedBytes += chunk.byteLength;
+      if (fileBytes > IMPORT_LIMITS.fileBytes) {
+        file.terminate();
+        throw new ArchiveExtractionError(`Import file exceeds the 3 MB limit: ${path}`);
+      }
+      if (emittedBytes > IMPORT_LIMITS.expandedBytes) {
+        file.terminate();
+        throw new ArchiveExtractionError("Archive exceeds the 75 MB expanded limit");
+      }
+      if (directory && fileBytes !== 0) {
+        file.terminate();
+        throw new ArchiveExtractionError(`Directory ZIP entry contains file data: ${path}`);
+      }
+
+      crcState = updateCrc32(crcState, chunk);
+      if (!directory && chunk.byteLength) chunks.push(chunk);
+      if (!final) return;
+
+      if (fileBytes !== metadata.expandedBytes) {
+        throw new ArchiveExtractionError(`Archive expanded-size mismatch: ${path}`);
+      }
+      if (((crcState ^ 0xffffffff) >>> 0) !== metadata.crc32) {
+        throw new ArchiveExtractionError(`Archive CRC checksum mismatch: ${path}`);
+      }
+      if (!directory) extracted.push({ path, bytes: concatenateChunks(chunks, fileBytes) });
+    };
+    file.start();
+  });
+  unzipper.register(UnzipInflate);
+
+  try {
+    for (let offset = 0; offset < data.byteLength; offset += extractionChunkBytes) {
+      const end = Math.min(offset + extractionChunkBytes, data.byteLength);
+      unzipper.push(data.subarray(offset, end), end === data.byteLength);
+    }
+  } catch (error) {
+    if (error instanceof ArchiveExtractionError) throw error;
+    throw new Error("Archive is corrupt or truncated");
+  }
+
+  if (seen.size !== expected.size || extracted.length !== emittedFiles) {
+    throw new Error("Archive is corrupt, truncated, or has inconsistent entries");
+  }
+  return extracted;
+}
+
+function stripCommonRoot(files: ExtractedFile[]) {
+  const paths = files.map((file) => file.path);
   const firstSegments = new Set(paths.map((path) => path.split("/", 1)[0]));
   const allNested = paths.every((path) => path.includes("/"));
   if (firstSegments.size !== 1 || !allNested) return files;
 
   const root = `${paths[0].split("/", 1)[0]}/`;
-  return Object.fromEntries(paths.map((path) => [path.slice(root.length), files[path]]));
+  return files.map((file) => ({ ...file, path: file.path.slice(root.length) }));
 }
 
 function assertUniquePaths(files: ValidatedImportFile[]) {
@@ -152,12 +271,17 @@ function detectProject(files: ValidatedImportFile[]): ImportProjectType {
   if (!index) throw new Error("Archive has no supported entry point (index.html)");
 
   const html = new TextDecoder().decode(index.bytes);
-  const sourceMatch = html.match(/<script[^>]+\bsrc=["'](?:\.?\/)?(src\/main\.(?:jsx|tsx))["'][^>]*>/i);
-  if (!sourceMatch) return "standalone-html";
+  const viteLikeScript = html.match(/<script\b[^>]*\bsrc=["'](?:\.?\/)?src\/main\.(?:jsx|tsx)["'][^>]*>/i)?.[0];
+  if (!viteLikeScript) return "standalone-html";
+  const viteScript = html.match(/<script\b[^>]*\bsrc=["']\/src\/main\.(?:jsx|tsx)["'][^>]*>\s*<\/script>/i)?.[0];
+  if (!viteScript) throw new Error("Archive has no supported Vite React entry point");
+  const supportedScript = /\bsrc=["']\/src\/main\.tsx["']/i.test(viteScript) &&
+    /\btype=["']module["']/i.test(viteScript);
+  if (!supportedScript) throw new Error("Archive has no supported Vite React entry point");
 
   const packageJson = parsePackageJson(byPath.get("package.json"));
   const dependencies = { ...packageJson?.devDependencies, ...packageJson?.dependencies };
-  if (!packageJson || typeof dependencies.react !== "string" || !byPath.has(sourceMatch[1])) {
+  if (!packageJson || typeof dependencies.react !== "string" || !byPath.has("src/main.tsx")) {
     throw new Error("Archive has no supported Vite React entry point");
   }
   return "vite-react";
@@ -170,14 +294,9 @@ function detectProject(files: ValidatedImportFile[]): ImportProjectType {
  */
 export async function inspectArchive(data: Uint8Array): Promise<ArchiveInspection> {
   const entries = readZipEntries(data);
-  const archiveFiles = await unzipArchive(data);
-  const expectedFiles = entries.filter((entry) => !entry.directory);
-  if (Object.keys(archiveFiles).length !== expectedFiles.length) {
-    throw new Error("Archive extraction did not preserve every file");
-  }
-
+  const archiveFiles = streamArchive(data, entries);
   const strippedFiles = stripCommonRoot(archiveFiles);
-  const files = Object.entries(strippedFiles).map(([path, bytes]) =>
+  const files = strippedFiles.map(({ path, bytes }) =>
     validateImportFile({ path, bytes, contentType: "application/octet-stream" })
   );
   assertUniquePaths(files);
