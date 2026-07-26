@@ -4,6 +4,7 @@ import { JsonViewer } from "../../../components/json-viewer";
 import { RunVisual } from "../../../components/run-visual";
 import { benchmarkSources } from "../../../lib/sources/config";
 import { SafeGitHubReader } from "../../../lib/github/client";
+import { displayRunStatus } from "../../../lib/runs/status-display";
 import { getRunById } from "../../../lib/storage/queries";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
     Tâche: run.task,
     Modèle: run.model,
     Harness: run.harness,
-    Statut: run.status,
+    Statut: displayRunStatus(run.status),
     Score: run.score,
     "Coût (USD)": run.totalCostUsd,
     Tokens: run.totalTokens,
@@ -52,7 +53,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           <h1 className="mt-3 text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">{run.task ?? "Résultat sans titre"}</h1>
           <p className="mt-2 text-[var(--text-muted)]">{run.model ?? "—"} · {run.harness ?? "—"}</p>
         </div>
-        <span className="rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-1 text-sm text-[var(--text-primary)]">{run.status}</span>
+        <span className="rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-1 text-sm text-[var(--text-primary)]">{displayRunStatus(run.status)}</span>
       </header>
       <div className="mt-6"><RunVisual branch={branch} run={run} /></div>
       <div className="my-6 flex flex-wrap gap-3">

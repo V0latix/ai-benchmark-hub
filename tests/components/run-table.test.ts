@@ -29,6 +29,20 @@ describe("filterRuns", () => {
     expect(within(container).getAllByText("ID ambigu")).toHaveLength(2);
   });
 
+  it("shows unknown status as a dash while keeping real statuses", () => {
+    const { container } = render(createElement(RunTable, {
+      runs: [
+        run("unknown-status", { task: "gmail-clone", status: "unknown", previewPath: "benchmarks/gmail-clone/index.html" }),
+        run("success-status", { task: "figma-clone", status: "success", previewPath: "benchmarks/figma-clone/index.html" })
+      ]
+    }));
+    const [, unknownRow, successRow] = within(container).getAllByRole("row");
+
+    expect(within(unknownRow).getByText("—")).toBeInTheDocument();
+    expect(within(container).queryByText("unknown")).not.toBeInTheDocument();
+    expect(within(successRow).getByText("success")).toBeInTheDocument();
+  });
+
   it("filters by model, task, harness, and status", () => {
     const visible = filterRuns([run("keep", { task: "task-a" }), run("drop", { sourceId: "source-b", model: "model-b", harness: "harness-b", status: "failed", task: "task-b" })], { model: "model-a", task: "task-a", harness: "harness-a", status: "success", search: "", sort: "cost" });
     expect(visible.map((item) => item.id)).toEqual(["keep"]);

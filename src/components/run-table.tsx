@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { displayRunStatus } from "../lib/runs/status-display";
 import type { NormalizedRun } from "../lib/sources/types";
 
 type SortKey = "cost" | "score" | "date" | "duration" | "model" | "task";
@@ -50,7 +51,7 @@ export function RunTable({ runs }: { runs: NormalizedRun[] }) {
       {label}
       <select className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-primary)]" value={filters[field]} onChange={(event) => setFilters({ ...filters, [field]: event.target.value })}>
         <option value="">Tous</option>
-        {values.map((value) => <option key={value} value={value}>{value}</option>)}
+        {values.map((value) => <option key={value} value={value}>{field === "status" && value === "unknown" ? "—" : value}</option>)}
       </select>
     </label>
   );
@@ -101,7 +102,7 @@ export function RunTable({ runs }: { runs: NormalizedRun[] }) {
                 <td className="p-3">{dash(run.model)}</td>
                 <td className="p-3">{dash(run.harness)}</td>
                 <td className="p-3">{run.previewPath || run.screenshotPath ? "Disponible" : "—"}</td>
-                <td className="p-3">{dash(run.status)}</td>
+                <td className="p-3">{displayRunStatus(run.status)}</td>
                 <td className="p-3">{formatDate(run.createdAt)}</td>
                 <td className="p-3">{ambiguousRunIds.has(run.id) ? <span className="text-xs text-[var(--text-muted)]">ID ambigu</span> : <Link className="font-medium text-[var(--accent)]" href={`/runs/${encodeURIComponent(run.id)}`}>Voir le run</Link>}</td>
               </tr>

@@ -33,8 +33,11 @@ no sign-in.
 
 The repository bundles a Melvynx snapshot for offline and development use. In
 production, the app also reads the small public `imports/index.json` overlay
-from `Melvynx/benchmarks`, validates its entries, and merges imported runs by
-stable ID. If that live overlay cannot be refreshed, the bundled data remains
+from `Melvynx/benchmarks` and validates its entries. The bundled snapshot is
+authoritative: every bundled row, order, and content is preserved. Imported
+runs use the task-qualified identity `[task,id]`; an exact identity never
+overwrites its bundled run, while a new task-qualified identity appends to the
+snapshot. If that live overlay cannot be refreshed, the bundled data remains
 available and the Explorer shows a non-blocking freshness notice.
 
 To refresh the local cache from the configured Melvynx repository:
