@@ -8,14 +8,20 @@ import { RunMetadataGrid } from "../../src/components/run-metadata-grid";
 import { makeNormalizedRun } from "../fixtures/normalized-run";
 import { resolveComparison } from "../../src/lib/tasks/view-model";
 
-const replace = vi.fn();
+const navigation = vi.hoisted(() => ({
+  query: "",
+  replace: vi.fn()
+}));
+const replace = navigation.replace;
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace })
+  useRouter: () => ({ replace }),
+  useSearchParams: () => new URLSearchParams(navigation.query)
 }));
 
 afterEach(() => {
   cleanup();
+  navigation.query = "";
   replace.mockReset();
 });
 
@@ -37,6 +43,40 @@ const readySelection = resolveComparison([
 ], { task: "gmail-clone", leftId: "left-run", rightId: "right-run" });
 
 describe("CompareWorkbench", () => {
+  it.each([
+    ["missing", ""],
+    ["task-only", "task=gmail-clone"]
+  ])("canonicalizes a %s URL to the resolved visible comparison", (_label, query) => {
+    navigation.query = query;
+
+    render(<CompareWorkbench selection={readySelection} />);
+
+    expect(replace).toHaveBeenLastCalledWith(
+      "/compare?task=gmail-clone&left=left-run&right=right-run",
+      { scroll: false }
+    );
+  });
+
+  it("replaces invalid and foreign run params with the resolved same-task ids", () => {
+    navigation.query = "task=gmail-clone&left=other-task-run&right=missing&extra=keep-me";
+
+    render(<CompareWorkbench selection={readySelection} />);
+
+    expect(replace).toHaveBeenLastCalledWith(
+      "/compare?task=gmail-clone&left=left-run&right=right-run",
+      { scroll: false }
+    );
+  });
+
+  it("does not replace or loop when the current URL is already canonical", () => {
+    navigation.query = "task=gmail-clone&left=left-run&right=right-run";
+    const { rerender } = render(<CompareWorkbench selection={readySelection} />);
+
+    rerender(<CompareWorkbench selection={readySelection} />);
+
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it("shows one large preview and alternates focus between selected runs", () => {
     render(<CompareWorkbench selection={readySelection} />);
 
@@ -64,7 +104,7 @@ describe("CompareWorkbench", () => {
       makeNormalizedRun("alpha-old", {
         task: "gmail-clone",
         model: "alpha",
-        createdAt: "2026-01-01T00:00:00Z"
+        createdAt: "2026-01-01T23:30:00Z"
       }),
       makeNormalizedRun("alpha-new", {
         task: "gmail-clone",
@@ -77,7 +117,7 @@ describe("CompareWorkbench", () => {
     render(<CompareWorkbench selection={selection} />);
 
     expect(screen.getByLabelText("Version du run A")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /alpha-old/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "1 janv. 2026 · alpha-old" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /alpha-new/ })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Version du run A"), { target: { value: "alpha-old" } });
@@ -115,6 +155,10 @@ describe("CompareWorkbench", () => {
 
     expect(screen.getByLabelText("Tâche")).toHaveValue("figma-clone");
     expect(screen.getByTitle("Visual result for figma-left")).toBeInTheDocument();
+    expect(replace).toHaveBeenLastCalledWith(
+      "/compare?task=figma-clone&left=figma-left&right=figma-right",
+      { scroll: false }
+    );
   });
 
   it("uses semantic Preview, Details, and Code tabs with task-qualified artifact links", () => {
@@ -234,5 +278,18 @@ describe("RunMetadataGrid", () => {
     expect(within(screen.getByRole("row", { name: /Coût/ })).getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["—", "0,00 $US"]);
     expect(within(screen.getByRole("row", { name: /Durée/ })).getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["—", "0 ms"]);
     expect(within(screen.getByRole("row", { name: /Tokens/ })).getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["—", "0"]);
+  });
+
+  it("formats near-midnight dates in UTC", () => {
+    const nearMidnight = makeNormalizedRun("near-midnight", {
+      createdAt: "2026-01-01T23:30:00Z"
+    });
+
+    render(<RunMetadataGrid left={nearMidnight} right={nearMidnight} />);
+
+    expect(within(screen.getByRole("row", { name: /Date/ })).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([
+      "1 janv. 2026",
+      "1 janv. 2026"
+    ]);
   });
 });

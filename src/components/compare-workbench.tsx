@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { benchmarkSources } from "../lib/sources/config";
 import type { NormalizedRun } from "../lib/sources/types";
@@ -24,7 +24,7 @@ function versionLabel(run: NormalizedRun) {
   const date = new Date(run.createdAt);
   const dateLabel = Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(date);
+    : new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeZone: "UTC" }).format(date);
   return `${dateLabel} · ${run.id}`;
 }
 
@@ -111,6 +111,9 @@ function CodeLinks({ label, run }: { label: "A" | "B"; run: NormalizedRun }) {
 
 export function CompareWorkbench({ selection }: { selection: ComparisonSelection }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedPath = useRef<string | null>(null);
+  const lastCanonicalization = useRef<string | null>(null);
   const selectionKey = `${selection.task ?? ""}\u0000${selection.leftId ?? ""}\u0000${selection.rightId ?? ""}`;
   const [pendingSelection, setPendingSelection] = useState({
     baseKey: selectionKey,
@@ -125,11 +128,43 @@ export function CompareWorkbench({ selection }: { selection: ComparisonSelection
   const [tab, setTab] = useState<"preview" | "details" | "code">("preview");
   const [split, setSplit] = useState(false);
 
+  const canonicalParams = new URLSearchParams();
+  if (selection.task) canonicalParams.set("task", selection.task);
+  if (selection.reason === "ready" && selection.leftId && selection.rightId) {
+    canonicalParams.set("left", selection.leftId);
+    canonicalParams.set("right", selection.rightId);
+  }
+  const canonicalQuery = canonicalParams.toString();
+  const canonicalPath = canonicalQuery ? `/compare?${canonicalQuery}` : "/compare";
+  const currentQuery = searchParams.toString();
+  const currentPath = currentQuery ? `/compare?${currentQuery}` : "/compare";
+
+  function navigate(path: string) {
+    requestedPath.current = path;
+    router.replace(path, { scroll: false });
+  }
+
+  useEffect(() => {
+    if (currentPath === canonicalPath) {
+      requestedPath.current = null;
+      lastCanonicalization.current = null;
+      return;
+    }
+
+    if (requestedPath.current === currentPath) return;
+
+    const transition = `${currentPath}\u0000${canonicalPath}`;
+    if (lastCanonicalization.current === transition) return;
+    lastCanonicalization.current = transition;
+    requestedPath.current = canonicalPath;
+    router.replace(canonicalPath, { scroll: false });
+  }, [canonicalPath, currentPath, router]);
+
   function replaceSelection(task: string, nextLeftId?: string, nextRightId?: string) {
     const params = new URLSearchParams({ task });
     if (nextLeftId) params.set("left", nextLeftId);
     if (nextRightId) params.set("right", nextRightId);
-    router.replace(`/compare?${params.toString()}`, { scroll: false });
+    navigate(`/compare?${params.toString()}`);
   }
 
   if (selection.reason === "no-tasks") {

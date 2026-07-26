@@ -11,7 +11,7 @@ function date(value: string | null) {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime())
     ? unknown
-    : new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(parsed);
+    : new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeZone: "UTC" }).format(parsed);
 }
 
 function number(value: number | null) {
