@@ -104,7 +104,7 @@ export class InMemoryGitWriter implements BenchmarkGitWriter {
   }
 
   async listTree(ref: string): Promise<Array<{ path: string; type: string; sha: string }>> {
-    if (!benchmarkGitWriterValidators.readRef(ref)) throw new Error("Unsafe Git ref");
+    if (!benchmarkGitWriterValidators.readRef(ref) && !this.commitTrees.has(ref)) throw new Error("Unsafe Git ref");
     const commitSha = this.refs.get(ref) ?? ref;
     const treeSha = this.commitTrees.get(commitSha);
     if (treeSha) {
