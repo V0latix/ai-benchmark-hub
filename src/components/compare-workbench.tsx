@@ -114,16 +114,8 @@ export function CompareWorkbench({ selection }: { selection: ComparisonSelection
   const searchParams = useSearchParams();
   const requestedPath = useRef<string | null>(null);
   const lastCanonicalization = useRef<string | null>(null);
-  const selectionKey = `${selection.task ?? ""}\u0000${selection.leftId ?? ""}\u0000${selection.rightId ?? ""}`;
-  const [pendingSelection, setPendingSelection] = useState({
-    baseKey: selectionKey,
-    leftId: selection.leftId,
-    rightId: selection.rightId
-  });
-  const leftId = pendingSelection.baseKey === selectionKey ? pendingSelection.leftId : selection.leftId;
-  const rightId = pendingSelection.baseKey === selectionKey ? pendingSelection.rightId : selection.rightId;
-  const left = runById(selection, leftId);
-  const right = runById(selection, rightId);
+  const left = runById(selection, selection.leftId);
+  const right = runById(selection, selection.rightId);
   const [focusedSide, setFocusedSide] = useState<"left" | "right">("left");
   const [tab, setTab] = useState<"preview" | "details" | "code">("preview");
   const [split, setSplit] = useState(false);
@@ -144,14 +136,23 @@ export function CompareWorkbench({ selection }: { selection: ComparisonSelection
     router.replace(path, { scroll: false });
   }
 
+  function comparisonPath(task: string, nextLeftId?: string, nextRightId?: string) {
+    const params = new URLSearchParams({ task });
+    if (nextLeftId) params.set("left", nextLeftId);
+    if (nextRightId) params.set("right", nextRightId);
+    return `/compare?${params.toString()}`;
+  }
+
   useEffect(() => {
     if (currentPath === canonicalPath) {
-      requestedPath.current = null;
-      lastCanonicalization.current = null;
+      if (requestedPath.current === null || requestedPath.current === currentPath) {
+        requestedPath.current = null;
+        lastCanonicalization.current = null;
+      }
       return;
     }
 
-    if (requestedPath.current === currentPath) return;
+    if (requestedPath.current === currentPath || requestedPath.current === canonicalPath) return;
 
     const transition = `${currentPath}\u0000${canonicalPath}`;
     if (lastCanonicalization.current === transition) return;
@@ -161,10 +162,7 @@ export function CompareWorkbench({ selection }: { selection: ComparisonSelection
   }, [canonicalPath, currentPath, router]);
 
   function replaceSelection(task: string, nextLeftId?: string, nextRightId?: string) {
-    const params = new URLSearchParams({ task });
-    if (nextLeftId) params.set("left", nextLeftId);
-    if (nextRightId) params.set("right", nextRightId);
-    navigate(`/compare?${params.toString()}`);
+    navigate(comparisonPath(task, nextLeftId, nextRightId));
   }
 
   if (selection.reason === "no-tasks") {
@@ -204,11 +202,11 @@ export function CompareWorkbench({ selection }: { selection: ComparisonSelection
     const nextRun = selection.models.find((candidate) => candidate.model === model)?.runs[0];
     if (!nextRun || !selection.task) return;
     if (side === "left") {
-      setPendingSelection({ baseKey: selectionKey, leftId: nextRun.id, rightId: currentRightId });
-      replaceSelection(selection.task, nextRun.id, currentRightId);
+      const path = comparisonPath(selection.task, nextRun.id, currentRightId);
+      navigate(path);
     } else {
-      setPendingSelection({ baseKey: selectionKey, leftId: currentLeftId, rightId: nextRun.id });
-      replaceSelection(selection.task, currentLeftId, nextRun.id);
+      const path = comparisonPath(selection.task, currentLeftId, nextRun.id);
+      navigate(path);
     }
   }
 
@@ -247,8 +245,9 @@ export function CompareWorkbench({ selection }: { selection: ComparisonSelection
               <select
                 className="min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[var(--text-primary)]"
                 onChange={(event) => {
-                  setPendingSelection({ baseKey: selectionKey, leftId: event.target.value, rightId: right.id });
-                  if (selection.task) replaceSelection(selection.task, event.target.value, right.id);
+                  if (!selection.task) return;
+                  const path = comparisonPath(selection.task, event.target.value, right.id);
+                  navigate(path);
                 }}
                 value={left.id}
               >
@@ -262,8 +261,9 @@ export function CompareWorkbench({ selection }: { selection: ComparisonSelection
               <select
                 className="min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[var(--text-primary)]"
                 onChange={(event) => {
-                  setPendingSelection({ baseKey: selectionKey, leftId: left.id, rightId: event.target.value });
-                  if (selection.task) replaceSelection(selection.task, left.id, event.target.value);
+                  if (!selection.task) return;
+                  const path = comparisonPath(selection.task, left.id, event.target.value);
+                  navigate(path);
                 }}
                 value={right.id}
               >

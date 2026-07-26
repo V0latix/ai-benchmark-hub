@@ -161,6 +161,50 @@ describe("CompareWorkbench", () => {
     );
   });
 
+  it("does not resurrect a consumed optimistic selection after back navigation", () => {
+    const runs = [
+      makeNormalizedRun("run-a", { model: "model-a" }),
+      makeNormalizedRun("run-b", { model: "model-b" }),
+      makeNormalizedRun("run-c", { model: "model-c" })
+    ];
+    const selectionAB = resolveComparison(runs, {
+      task: "gmail-clone",
+      leftId: "run-a",
+      rightId: "run-b"
+    });
+    const selectionCB = resolveComparison(runs, {
+      task: "gmail-clone",
+      leftId: "run-c",
+      rightId: "run-b"
+    });
+    navigation.query = "task=gmail-clone&left=run-a&right=run-b";
+    const { rerender } = render(<CompareWorkbench selection={selectionAB} />);
+
+    fireEvent.change(screen.getByLabelText("Modèle A"), { target: { value: "model-c" } });
+    expect(replace).toHaveBeenLastCalledWith(
+      "/compare?task=gmail-clone&left=run-c&right=run-b",
+      { scroll: false }
+    );
+
+    replace.mockClear();
+    rerender(<CompareWorkbench selection={selectionCB} />);
+    expect(replace).not.toHaveBeenCalled();
+
+    navigation.query = "task=gmail-clone&left=run-c&right=run-b";
+    rerender(<CompareWorkbench selection={selectionCB} />);
+    expect(screen.getByLabelText("Modèle A")).toHaveValue("model-c");
+    expect(screen.getByTitle("Visual result for run-c")).toBeInTheDocument();
+
+    replace.mockClear();
+    navigation.query = "task=gmail-clone&left=run-a&right=run-b";
+    rerender(<CompareWorkbench selection={selectionAB} />);
+
+    expect(screen.getByLabelText("Modèle A")).toHaveValue("model-a");
+    expect(screen.getByTitle("Visual result for run-a")).toBeInTheDocument();
+    expect(screen.queryByTitle("Visual result for run-c")).not.toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it("uses semantic Preview, Details, and Code tabs with task-qualified artifact links", () => {
     render(<CompareWorkbench selection={readySelection} />);
 
