@@ -16,13 +16,10 @@ export function TaskCard({ card }: { card: TaskCardView }) {
   const label = taskLabel(card.task);
   const runCount = formatCountLabel(card.runCount, "run");
   const modelCount = formatCountLabel(card.modelCount, "modèle");
+  const accessibleLabel = `Ouvrir ${label}, ${runCount} et ${modelCount}`;
 
   return (
-    <Link
-      aria-label={`Ouvrir ${label}, ${runCount} et ${modelCount}`}
-      className="group grid min-w-0 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] transition duration-200 hover:-translate-y-0.5 hover:border-[var(--accent)] hover:shadow-xl hover:shadow-cyan-950/20"
-      href={`/tasks/${encodeURIComponent(card.task)}`}
-    >
+    <article className="group relative grid min-w-0 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] transition duration-200 hover:-translate-y-0.5 hover:border-[var(--accent)] hover:shadow-xl hover:shadow-cyan-950/20">
       <div className="relative aspect-[16/10] overflow-hidden border-b border-[var(--border)] bg-slate-950">
         {card.representativeRunId ? (
           <RunPreviewFrame
@@ -47,6 +44,13 @@ export function TaskCard({ card }: { card: TaskCardView }) {
         </div>
         <span aria-hidden="true" className="shrink-0 text-xl text-[var(--accent)] transition-transform group-hover:translate-x-1">→</span>
       </div>
-    </Link>
+      <Link
+        aria-label={accessibleLabel}
+        className="absolute inset-0 z-10 rounded-2xl focus-visible:outline-offset-[-3px]"
+        href={`/tasks/${encodeURIComponent(card.task)}`}
+      >
+        <span className="sr-only">{accessibleLabel}</span>
+      </Link>
+    </article>
   );
 }

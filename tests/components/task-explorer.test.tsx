@@ -88,7 +88,15 @@ describe("TaskExplorer", () => {
     expect(preview).toHaveAttribute("src", "/api/runs/gmail/visual?interactive=2");
     expect(preview).toHaveAttribute("tabindex", "-1");
     expect(preview).toHaveClass("pointer-events-none");
+    expect(preview.closest("a")).toBeNull();
     expect(screen.getAllByRole("link")).toHaveLength(1);
+  });
+
+  it("renders an explicit empty thumbnail instead of an iframe without a representative preview", () => {
+    render(<TaskExplorer cards={[{ ...cards[0], representativeRunId: null }]} />);
+
+    expect(screen.getByText("Aucun aperçu disponible")).toBeInTheDocument();
+    expect(screen.queryByTitle("Aperçu de Gmail clone")).not.toBeInTheDocument();
   });
 
   it("uses singular labels for a single run or model", () => {
@@ -121,5 +129,23 @@ describe("TaskRunBrowser", () => {
 
     expect(screen.getByRole("button", { name: /run run-a$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /run run-b$/i })).toBeInTheDocument();
+  });
+
+  it("keeps an ambiguous run visible but disables its preview and detail link", () => {
+    const ambiguous = makeRun("shared-run", "model-a");
+    render(
+      <TaskRunBrowser
+        initialRunId="shared-run"
+        prompt={null}
+        runs={[ambiguous]}
+        task="timezone-checker"
+        unresolvableRunIds={["shared-run"]}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: /shared-run/i })).toBeInTheDocument();
+    expect(screen.getByText(/identifiant est partagé entre plusieurs tâches/i)).toBeInTheDocument();
+    expect(screen.queryByTitle("Visual result for shared-run")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Voir le détail du run/i })).not.toBeInTheDocument();
   });
 });

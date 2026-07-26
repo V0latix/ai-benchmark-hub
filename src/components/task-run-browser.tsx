@@ -29,12 +29,14 @@ export function TaskRunBrowser({
   initialRunId,
   prompt,
   runs,
-  task
+  task,
+  unresolvableRunIds = []
 }: {
   initialRunId: string | null;
   prompt: string | null;
   runs: NormalizedRun[];
   task: string;
+  unresolvableRunIds?: string[];
 }) {
   const initialRun = runs.find((run) => run.id === initialRunId) ?? runs[0] ?? null;
   const [activeRunId, setActiveRunId] = useState(initialRun?.id ?? null);
@@ -47,6 +49,8 @@ export function TaskRunBrowser({
       </div>
     );
   }
+
+  const activeRunIsUnresolvable = unresolvableRunIds.includes(activeRun.id);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
@@ -82,6 +86,9 @@ export function TaskRunBrowser({
                   >
                     <span className="block truncate font-medium">{run.model ?? "Modèle inconnu"}</span>
                     <span className="mt-1 block truncate text-xs opacity-80">{runMetadataLabel(run)}</span>
+                    {unresolvableRunIds.includes(run.id) && (
+                      <span className="mt-1 block text-xs text-amber-200">Aperçu et détail indisponibles</span>
+                    )}
                   </button>
                 </li>
               );
@@ -98,7 +105,18 @@ export function TaskRunBrowser({
       </aside>
 
       <section aria-live="polite" className="min-w-0">
-        <RunVisual branch={branchFor(activeRun)} run={activeRun} />
+        {activeRunIsUnresolvable ? (
+          <section className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-amber-400/40 bg-amber-400/5 px-6 text-center">
+            <div>
+              <p className="font-medium text-[var(--text-primary)]">Aperçu et détail indisponibles</p>
+              <p className="mt-2 max-w-lg text-sm leading-6 text-[var(--text-muted)]">
+                Cet identifiant est partagé entre plusieurs tâches. Le run reste listé, mais aucun contenu ne sera ouvert sans résolution non ambiguë.
+              </p>
+            </div>
+          </section>
+        ) : (
+          <RunVisual branch={branchFor(activeRun)} run={activeRun} />
+        )}
         <div className="mt-4 flex flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:flex-row sm:items-end sm:justify-between">
           <dl className="grid min-w-0 flex-1 grid-cols-2 gap-4 sm:grid-cols-3">
             <div className="min-w-0">
@@ -114,9 +132,13 @@ export function TaskRunBrowser({
               <dd className="mt-1 truncate font-medium text-[var(--text-primary)]">{formattedDate(activeRun.createdAt)}</dd>
             </div>
           </dl>
-          <Link className="shrink-0 text-sm font-semibold text-[var(--accent)] hover:underline" href={`/runs/${encodeURIComponent(activeRun.id)}`}>
-            Voir le détail du run →
-          </Link>
+          {activeRunIsUnresolvable ? (
+            <span className="shrink-0 text-sm font-medium text-[var(--text-muted)]">Détail indisponible</span>
+          ) : (
+            <Link className="shrink-0 text-sm font-semibold text-[var(--accent)] hover:underline" href={`/runs/${encodeURIComponent(activeRun.id)}`}>
+              Voir le détail du run →
+            </Link>
+          )}
         </div>
       </section>
     </div>

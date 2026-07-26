@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { makeNormalizedRun } from "../fixtures/normalized-run";
-import { buildTaskCards, buildTaskDetail, resolveComparison } from "../../src/lib/tasks/view-model";
+import { buildTaskCards, buildTaskDetail, resolveComparison, taskFromRouteParam } from "../../src/lib/tasks/view-model";
 
 const run = makeNormalizedRun;
 
@@ -27,6 +27,27 @@ describe("buildTaskCards", () => {
     ]);
 
     expect(cards[0].representativeRunId).toBe("valid");
+  });
+
+  it("excludes run ids shared across tasks from representative previews", () => {
+    const cards = buildTaskCards([
+      run("shared", { task: "3d-sponge-bob", previewPath: "benchmarks/3d-sponge-bob/shared/index.html" }),
+      run("shared", { task: "timezone-checker", previewPath: "benchmarks/timezone-checker/shared/index.html" }),
+      run("timezone-safe", { task: "timezone-checker", previewPath: "benchmarks/timezone-checker/safe/index.html" })
+    ]);
+
+    expect(cards).toMatchObject([
+      { task: "3d-sponge-bob", representativeRunId: null },
+      { task: "timezone-checker", representativeRunId: "timezone-safe" }
+    ]);
+  });
+
+  it("does not fall back to a run without a preview", () => {
+    const cards = buildTaskCards([
+      run("result-only", { task: "thumbfast", previewPath: null, resultPath: "results/thumbfast.md" })
+    ]);
+
+    expect(cards[0].representativeRunId).toBeNull();
   });
 
   it("matches either a task name or one of its model names", () => {
@@ -63,6 +84,22 @@ describe("buildTaskDetail", () => {
 
   it("returns null when the requested task has no runs", () => {
     expect(buildTaskDetail([run("a")], "figma-clone")).toBeNull();
+  });
+
+  it("keeps colliding runs visible and reports their ids as ambiguous", () => {
+    const detail = buildTaskDetail([
+      run("shared", { task: "3d-sponge-bob", previewPath: "benchmarks/3d-sponge-bob/shared/index.html" }),
+      run("shared", { task: "timezone-checker", previewPath: "benchmarks/timezone-checker/shared/index.html" })
+    ], "timezone-checker");
+
+    expect(detail?.runs.map((item) => item.id)).toEqual(["shared"]);
+    expect(detail?.ambiguousRunIds).toEqual(["shared"]);
+  });
+});
+
+describe("taskFromRouteParam", () => {
+  it("preserves literal percent escape text from an already-decoded route param", () => {
+    expect(taskFromRouteParam("literal%2Ftask")).toBe("literal%2Ftask");
   });
 });
 

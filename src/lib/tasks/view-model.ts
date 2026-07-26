@@ -13,6 +13,7 @@ export type TaskDetailView = {
   runs: NormalizedRun[];
   models: Array<{ model: string; runs: NormalizedRun[] }>;
   representativeRunId: string | null;
+  ambiguousRunIds: string[];
 };
 
 export type ComparisonRequest = {
@@ -31,6 +32,10 @@ export type ComparisonSelection = {
 };
 
 type ModelRuns = { model: string; runs: NormalizedRun[] };
+
+export function taskFromRouteParam(value: string) {
+  return value;
+}
 
 function compareText(left: string, right: string) {
   return left.localeCompare(right);
@@ -58,9 +63,27 @@ function hasPreview(run: NormalizedRun) {
   return Boolean(run.previewPath && run.task && run.previewPath.startsWith(`benchmarks/${run.task}/`));
 }
 
-function representativeRunId(runs: NormalizedRun[]) {
+function sharedAcrossTaskIds(runs: NormalizedRun[]) {
+  const tasksById = new Map<string, Set<string | null>>();
+  for (const run of runs) {
+    const tasks = tasksById.get(run.id) ?? new Set<string | null>();
+    tasks.add(run.task);
+    tasksById.set(run.id, tasks);
+  }
+  return new Set([...tasksById].filter(([, tasks]) => tasks.size > 1).map(([id]) => id));
+}
+
+function representativePreviewRunId(runs: NormalizedRun[], excludedIds: Set<string>) {
   const sortedRuns = sortRunsNewestFirst(runs);
-  return sortedRuns.find(hasPreview)?.id ?? sortedRuns[0]?.id ?? null;
+  return sortedRuns.find((run) => !excludedIds.has(run.id) && hasPreview(run))?.id ?? null;
+}
+
+function defaultRunId(runs: NormalizedRun[], excludedIds: Set<string>) {
+  const sortedRuns = sortRunsNewestFirst(runs);
+  return representativePreviewRunId(sortedRuns, excludedIds)
+    ?? sortedRuns.find((run) => !excludedIds.has(run.id))?.id
+    ?? sortedRuns[0]?.id
+    ?? null;
 }
 
 function groupModels(runs: NormalizedRun[]): ModelRuns[] {
@@ -86,6 +109,7 @@ function groupTaskRuns(runs: NormalizedRun[]) {
 
 export function buildTaskCards(runs: NormalizedRun[], query?: string): TaskCardView[] {
   const search = query?.trim().toLowerCase();
+  const ambiguousIds = sharedAcrossTaskIds(runs);
   return [...groupTaskRuns(runs).entries()]
     .map(([task, taskRuns]) => {
       const models = groupModels(taskRuns).map(({ model }) => model);
@@ -94,7 +118,7 @@ export function buildTaskCards(runs: NormalizedRun[], query?: string): TaskCardV
         runCount: taskRuns.length,
         modelCount: models.length,
         models,
-        representativeRunId: representativeRunId(taskRuns)
+        representativeRunId: representativePreviewRunId(taskRuns, ambiguousIds)
       };
     })
     .filter((card) => !search || card.task.toLowerCase().includes(search) || card.models.some((model) => model.toLowerCase().includes(search)))
@@ -104,12 +128,14 @@ export function buildTaskCards(runs: NormalizedRun[], query?: string): TaskCardV
 export function buildTaskDetail(runs: NormalizedRun[], task: string): TaskDetailView | null {
   const taskRuns = sortRunsNewestFirst(runs.filter((run) => run.task === task));
   if (!taskRuns.length) return null;
+  const ambiguousIds = sharedAcrossTaskIds(runs);
 
   return {
     task,
     runs: taskRuns,
     models: groupModels(taskRuns),
-    representativeRunId: representativeRunId(taskRuns)
+    representativeRunId: defaultRunId(taskRuns, ambiguousIds),
+    ambiguousRunIds: taskRuns.flatMap((run) => ambiguousIds.has(run.id) ? [run.id] : []).sort(compareText)
   };
 }
 

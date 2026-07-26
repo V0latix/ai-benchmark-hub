@@ -8,16 +8,9 @@ import { benchmarkSources } from "../../../lib/sources/config";
 import { MELVYNX_SOURCE_ID } from "../../../lib/sources/types";
 import { getTaskDetail } from "../../../lib/storage/queries";
 import { getMelvynxTaskPrompt } from "../../../lib/tasks/catalog";
+import { taskFromRouteParam } from "../../../lib/tasks/view-model";
 
 export const dynamic = "force-dynamic";
-
-function decodedTask(value: string) {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return null;
-  }
-}
 
 function taskLabel(task: string) {
   const words = task.replace(/[-_]+/g, " ");
@@ -25,8 +18,7 @@ function taskLabel(task: string) {
 }
 
 export default async function TaskPage({ params }: { params: Promise<{ task: string }> }) {
-  const task = decodedTask((await params).task);
-  if (!task) notFound();
+  const task = taskFromRouteParam((await params).task);
 
   const detail = await getTaskDetail(task);
   if (!detail) notFound();
@@ -62,7 +54,13 @@ export default async function TaskPage({ params }: { params: Promise<{ task: str
           </Link>
         )}
       </header>
-      <TaskRunBrowser initialRunId={detail.representativeRunId} prompt={promptText} runs={detail.runs} task={detail.task} />
+      <TaskRunBrowser
+        initialRunId={detail.representativeRunId}
+        prompt={promptText}
+        runs={detail.runs}
+        task={detail.task}
+        unresolvableRunIds={detail.ambiguousRunIds}
+      />
     </section>
   );
 }
