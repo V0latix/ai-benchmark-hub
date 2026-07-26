@@ -1,5 +1,9 @@
 import type { NormalizedRun, SyncReport } from "../sources/types";
-import { mergeImportedRuns, readImportedRuns } from "./import-manifest";
+import {
+  mergeImportedRuns,
+  readImportedRuns,
+  type ParsedImportedRuns
+} from "./import-manifest";
 import { readBundledSnapshot, readLocalCache } from "./json-store";
 import { buildTaskCards, buildTaskDetail, resolveComparison, type ComparisonRequest } from "../tasks/view-model";
 
@@ -7,12 +11,14 @@ export type RunFilters = { search?: string; model?: string; status?: string; har
 
 export type QueryCache = { runs: NormalizedRun[]; report: SyncReport; freshnessWarnings: string[] };
 
-export async function getCache(): Promise<QueryCache> {
+export async function getCache(
+  importedRunReader: () => Promise<ParsedImportedRuns> = readImportedRuns
+): Promise<QueryCache> {
   try {
     const localCache = process.env.VERCEL ? null : await readLocalCache();
     if (localCache) return { ...localCache, freshnessWarnings: [] };
 
-    const imported = await readImportedRuns();
+    const imported = await importedRunReader();
     const bundled = readBundledSnapshot();
     return { ...bundled, runs: mergeImportedRuns(bundled.runs, imported.runs), freshnessWarnings: imported.warnings };
   } catch {

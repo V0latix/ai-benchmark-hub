@@ -42,12 +42,16 @@ export function TaskExplorer({ cards }: { cards: TaskCardView[] }) {
         </div>
       </div>
 
+      <p aria-atomic="true" aria-live="polite" className="sr-only" role="status">
+        {filteredCards.length} {filteredCards.length === 1 ? "tâche affichée" : "tâches affichées"}
+      </p>
+
       {filteredCards.length ? (
-        <div aria-live="polite" className="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {filteredCards.map((card) => <TaskCard card={card} key={card.task} />)}
         </div>
       ) : (
-        <div aria-live="polite" className="mt-6 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-6 py-14 text-center">
+        <div className="mt-6 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-6 py-14 text-center">
           <p className="font-medium text-[var(--text-primary)]">
             {cards.length ? "Aucune tâche ne correspond à votre recherche." : "Aucune tâche publiée pour le moment."}
           </p>

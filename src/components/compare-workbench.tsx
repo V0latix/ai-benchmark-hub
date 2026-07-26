@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { benchmarkSources } from "../lib/sources/config";
@@ -10,6 +10,28 @@ import { comparisonSearchSignature } from "../lib/tasks/comparison-url";
 import type { ComparisonSelection } from "../lib/tasks/view-model";
 import { RunMetadataGrid } from "./run-metadata-grid";
 import { RunVisual } from "./run-visual";
+
+const desktopSplitQuery = "(min-width: 1024px)";
+const comparisonTabs = [
+  ["preview", "Aperçu"],
+  ["details", "Détails"],
+  ["code", "Code"]
+] as const;
+type ComparisonTab = (typeof comparisonTabs)[number][0];
+
+function subscribeToDesktopSplit(listener: () => void) {
+  const media = window.matchMedia(desktopSplitQuery);
+  media.addEventListener("change", listener);
+  return () => media.removeEventListener("change", listener);
+}
+
+function getDesktopSplitSnapshot() {
+  return window.matchMedia(desktopSplitQuery).matches;
+}
+
+function getServerDesktopSplitSnapshot() {
+  return false;
+}
 
 function branchFor(run: NormalizedRun) {
   return benchmarkSources.find((source) => source.id === run.sourceId)?.branch ?? "main";
@@ -124,8 +146,14 @@ export function CompareWorkbench({
   const left = runById(selection, selection.leftId);
   const right = runById(selection, selection.rightId);
   const [focusedSide, setFocusedSide] = useState<"left" | "right">("left");
-  const [tab, setTab] = useState<"preview" | "details" | "code">("preview");
+  const [tab, setTab] = useState<ComparisonTab>("preview");
   const [split, setSplit] = useState(false);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const isDesktopSplit = useSyncExternalStore(
+    subscribeToDesktopSplit,
+    getDesktopSplitSnapshot,
+    getServerDesktopSplitSnapshot
+  );
 
   const canonicalParams = new URLSearchParams();
   if (selection.task) canonicalParams.set("task", selection.task);
@@ -174,6 +202,23 @@ export function CompareWorkbench({
 
   function replaceSelection(task: string, nextLeftId?: string, nextRightId?: string) {
     navigate(comparisonPath(task, nextLeftId, nextRightId));
+  }
+
+  function activateTab(index: number) {
+    setTab(comparisonTabs[index][0]);
+    tabRefs.current[index]?.focus();
+  }
+
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % comparisonTabs.length;
+    if (event.key === "ArrowLeft") nextIndex = (index - 1 + comparisonTabs.length) % comparisonTabs.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = comparisonTabs.length - 1;
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    activateTab(nextIndex);
   }
 
   if (selection.reason === "no-tasks") {
@@ -287,11 +332,7 @@ export function CompareWorkbench({
 
       <div className="flex items-center justify-between gap-3 border-b border-[var(--border)]">
         <div aria-label="Vues de comparaison" className="flex gap-1" role="tablist">
-          {([
-            ["preview", "Aperçu"],
-            ["details", "Détails"],
-            ["code", "Code"]
-          ] as const).map(([value, label]) => (
+          {comparisonTabs.map(([value, label], index) => (
             <button
               aria-controls={`compare-panel-${value}`}
               aria-selected={tab === value}
@@ -303,7 +344,12 @@ export function CompareWorkbench({
               id={`compare-tab-${value}`}
               key={value}
               onClick={() => setTab(value)}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
+              ref={(node) => {
+                tabRefs.current[index] = node;
+              }}
               role="tab"
+              tabIndex={tab === value ? 0 : -1}
               type="button"
             >
               {label}
@@ -312,7 +358,7 @@ export function CompareWorkbench({
         </div>
         {tab === "preview" && (
           <button
-            aria-pressed={split}
+            aria-pressed={split && isDesktopSplit}
             className="hidden min-h-11 items-center rounded-lg border border-[var(--border)] px-3 text-sm font-medium text-[var(--text-primary)] hover:border-[var(--accent)] lg:inline-flex"
             onClick={() => setSplit((current) => !current)}
             type="button"
@@ -322,72 +368,77 @@ export function CompareWorkbench({
         )}
       </div>
 
-      {tab === "preview" && (
-        <section aria-labelledby="compare-tab-preview" id="compare-panel-preview" role="tabpanel">
-          <div aria-label="Run affiché" className="mb-4 grid grid-cols-2 gap-2" role="group">
-            {([
-              ["left", "A", left],
-              ["right", "B", right]
-            ] as const).map(([side, label, run]) => (
-              <button
-                aria-pressed={focusedSide === side}
-                className={`min-w-0 rounded-xl border px-4 py-3 text-left transition ${
-                  focusedSide === side
-                    ? "border-[var(--accent)] bg-cyan-400/10"
-                    : "border-[var(--border)] bg-[var(--surface)]"
-                }`}
-                key={side}
-                onClick={() => setFocusedSide(side)}
-                type="button"
-              >
-                <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--accent)]">Modèle {label}</span>
-                <span className="mt-1 block truncate font-semibold text-[var(--text-primary)]">{run.model ?? "—"}</span>
-                <span className="mt-1 block truncate text-xs text-[var(--text-muted)]">Run {run.id}</span>
-              </button>
-            ))}
-          </div>
+      <section
+        aria-labelledby="compare-tab-preview"
+        hidden={tab !== "preview"}
+        id="compare-panel-preview"
+        role="tabpanel"
+      >
+        {tab === "preview" && (
+          <>
+            <div aria-label="Run affiché" className="mb-4 grid grid-cols-2 gap-2" role="group">
+              {([
+                ["left", "A", left],
+                ["right", "B", right]
+              ] as const).map(([side, label, run]) => (
+                <button
+                  aria-pressed={focusedSide === side}
+                  className={`min-w-0 rounded-xl border px-4 py-3 text-left transition ${
+                    focusedSide === side
+                      ? "border-[var(--accent)] bg-cyan-400/10"
+                      : "border-[var(--border)] bg-[var(--surface)]"
+                  }`}
+                  key={side}
+                  onClick={() => setFocusedSide(side)}
+                  type="button"
+                >
+                  <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--accent)]">Modèle {label}</span>
+                  <span className="mt-1 block truncate font-semibold text-[var(--text-primary)]">{run.model ?? "—"}</span>
+                  <span className="mt-1 block truncate text-xs text-[var(--text-muted)]">Run {run.id}</span>
+                </button>
+              ))}
+            </div>
 
-          {split ? (
-            <>
-              <div aria-label="Vue alternée mobile" className="lg:hidden" role="region">
+            {split && isDesktopSplit ? (
+              <div aria-label="Vue scindée des runs" className="grid gap-4 lg:grid-cols-2" role="region">
+                <ComparisonVisual ambiguous={leftIsAmbiguous} run={left} />
+                <ComparisonVisual ambiguous={rightIsAmbiguous} run={right} />
+              </div>
+            ) : (
+              <div aria-label="Vue alternée des runs" role="region">
                 <ComparisonVisual
                   ambiguous={focusedSide === "left" ? leftIsAmbiguous : rightIsAmbiguous}
                   run={activeRun}
                 />
               </div>
-              <div aria-label="Vue scindée des runs" className="hidden gap-4 lg:grid lg:grid-cols-2" role="region">
-                <ComparisonVisual ambiguous={leftIsAmbiguous} run={left} />
-                <ComparisonVisual ambiguous={rightIsAmbiguous} run={right} />
-              </div>
-            </>
-          ) : (
-            <div aria-label="Vue alternée des runs" role="region">
-              <ComparisonVisual
-                ambiguous={focusedSide === "left" ? leftIsAmbiguous : rightIsAmbiguous}
-                run={activeRun}
-              />
-            </div>
-          )}
-        </section>
-      )}
+            )}
+          </>
+        )}
+      </section>
 
-      {tab === "details" && (
-        <section aria-labelledby="compare-tab-details" id="compare-panel-details" role="tabpanel">
-          <RunMetadataGrid left={left} right={right} />
-        </section>
-      )}
+      <section
+        aria-labelledby="compare-tab-details"
+        hidden={tab !== "details"}
+        id="compare-panel-details"
+        role="tabpanel"
+      >
+        {tab === "details" && <RunMetadataGrid left={left} right={right} />}
+      </section>
 
-      {tab === "code" && (
-        <section
-          aria-labelledby="compare-tab-code"
-          className="grid gap-4 md:grid-cols-2"
-          id="compare-panel-code"
-          role="tabpanel"
-        >
-          <CodeLinks label="A" run={left} />
-          <CodeLinks label="B" run={right} />
-        </section>
-      )}
+      <section
+        aria-labelledby="compare-tab-code"
+        className={tab === "code" ? "grid gap-4 md:grid-cols-2" : undefined}
+        hidden={tab !== "code"}
+        id="compare-panel-code"
+        role="tabpanel"
+      >
+        {tab === "code" && (
+          <>
+            <CodeLinks label="A" run={left} />
+            <CodeLinks label="B" run={right} />
+          </>
+        )}
+      </section>
     </div>
   );
 }

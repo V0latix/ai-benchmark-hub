@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CompareWorkbench } from "../../src/components/compare-workbench";
 import { RunMetadataGrid } from "../../src/components/run-metadata-grid";
@@ -14,17 +14,40 @@ const navigation = vi.hoisted(() => ({
   replace: vi.fn()
 }));
 const replace = navigation.replace;
+let desktopMatches = false;
+const mediaListeners = new Set<() => void>();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace }),
   useSearchParams: () => new URLSearchParams(navigation.query)
 }));
 
+beforeEach(() => {
+  desktopMatches = false;
+  mediaListeners.clear();
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+    addEventListener: (_type: string, listener: () => void) => mediaListeners.add(listener),
+    dispatchEvent: () => true,
+    matches: desktopMatches,
+    media: query,
+    onchange: null,
+    removeEventListener: (_type: string, listener: () => void) => mediaListeners.delete(listener)
+  })));
+});
+
 afterEach(() => {
   cleanup();
   navigation.query = "";
   replace.mockReset();
+  vi.unstubAllGlobals();
 });
+
+function setDesktopMatches(matches: boolean) {
+  desktopMatches = matches;
+  act(() => {
+    mediaListeners.forEach((listener) => listener());
+  });
+}
 
 const readySelection = resolveComparison([
   makeNormalizedRun("left-run", {
@@ -249,12 +272,52 @@ describe("CompareWorkbench", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
-  it("uses semantic Preview, Details, and Code tabs with task-qualified artifact links", () => {
-    render(<CompareWorkbench selection={readySelection} />);
+  it("uses roving tab focus, keyboard navigation, and mounted tabpanel shells", () => {
+    const { container } = render(<CompareWorkbench selection={readySelection} />);
+    const preview = screen.getByRole("tab", { name: "Aperçu" });
+    const details = screen.getByRole("tab", { name: "Détails" });
+    const code = screen.getByRole("tab", { name: "Code" });
 
-    expect(screen.getByRole("tab", { name: "Aperçu" })).toHaveAttribute("aria-selected", "true");
+    expect(preview).toHaveAttribute("tabindex", "0");
+    expect(details).toHaveAttribute("tabindex", "-1");
+    expect(code).toHaveAttribute("tabindex", "-1");
+    for (const tab of [preview, details, code]) {
+      const panel = container.querySelector(`#${tab.getAttribute("aria-controls")}`);
+      expect(panel).toBeInTheDocument();
+    }
+
+    preview.focus();
+    fireEvent.keyDown(preview, { key: "ArrowRight" });
+    expect(details).toHaveFocus();
+    expect(details).toHaveAttribute("aria-selected", "true");
+    expect(details).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("table")).toBeInTheDocument();
+
+    fireEvent.keyDown(details, { key: "End" });
+    expect(code).toHaveFocus();
+    expect(code).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(code, { key: "ArrowRight" });
+    expect(preview).toHaveFocus();
+    expect(preview).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(preview, { key: "ArrowLeft" });
+    expect(code).toHaveFocus();
+
+    fireEvent.keyDown(code, { key: "Home" });
+    expect(preview).toHaveFocus();
+  });
+
+  it("mounts content only for the active tab while keeping task-qualified artifact links", () => {
+    const { container } = render(<CompareWorkbench selection={readySelection} />);
+
+    expect(container.querySelector("#compare-panel-preview")).not.toHaveAttribute("hidden");
+    expect(container.querySelector("#compare-panel-details")).toHaveAttribute("hidden");
+    expect(container.querySelector("#compare-panel-code")).toHaveAttribute("hidden");
+
     fireEvent.click(screen.getByRole("tab", { name: "Détails" }));
     expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.queryByTitle("Visual result for left-run")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Code" }));
 
@@ -267,25 +330,32 @@ describe("CompareWorkbench", () => {
       "https://github.com/Melvynx/benchmarks/blob/main/benchmarks/gmail-clone/model-b/index.html"
     );
     expect(screen.getAllByRole("link").every((link) => link.getAttribute("href")?.startsWith("https://github.com/"))).toBe(true);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
-  it("keeps the split control desktop-only while retaining an alternating mobile preview", () => {
-    render(<CompareWorkbench selection={readySelection} />);
+  it("mounts exactly one mobile preview and two desktop previews in split mode", () => {
+    const { container } = render(<CompareWorkbench selection={readySelection} />);
 
     const splitControl = screen.getByRole("button", { name: "Vue scindée" });
     expect(splitControl).toHaveClass("hidden", "lg:inline-flex");
     fireEvent.click(splitControl);
 
+    expect(container.querySelectorAll("iframe")).toHaveLength(1);
+    expect(screen.getByTitle("Visual result for left-run")).toBeInTheDocument();
+    expect(screen.queryByTitle("Visual result for right-run")).not.toBeInTheDocument();
+
+    setDesktopMatches(true);
+
     expect(splitControl).toHaveAttribute("aria-pressed", "true");
+    expect(container.querySelectorAll("iframe")).toHaveLength(2);
     const split = screen.getByRole("region", { name: "Vue scindée des runs" });
-    expect(split).toHaveClass("hidden", "lg:grid");
     expect(within(split).getByTitle("Visual result for left-run")).toBeInTheDocument();
     expect(within(split).getByTitle("Visual result for right-run")).toBeInTheDocument();
 
-    const mobile = screen.getByRole("region", { name: "Vue alternée mobile" });
-    expect(mobile).toHaveClass("lg:hidden");
-    expect(within(mobile).getByTitle("Visual result for left-run")).toBeInTheDocument();
-    expect(within(mobile).queryByTitle("Visual result for right-run")).not.toBeInTheDocument();
+    setDesktopMatches(false);
+
+    expect(container.querySelectorAll("iframe")).toHaveLength(1);
+    expect(screen.queryByTitle("Visual result for right-run")).not.toBeInTheDocument();
   });
 
   it("shows distinct empty states without empty model selectors", () => {

@@ -11,6 +11,7 @@ const runStatuses: RunStatus[] = ["success", "failed", "partial", "timeout", "un
 
 export type ImportedRunManifest = { version: 1; runs: NormalizedRun[] };
 export type ParsedImportedRuns = { runs: NormalizedRun[]; warnings: string[] };
+export type ImportedRunsReader = (fetcher?: typeof fetch) => Promise<ParsedImportedRuns>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -76,6 +77,10 @@ export function parseImportedRunManifest(value: unknown): ParsedImportedRuns {
   return { runs, warnings };
 }
 
+function isImportedRunManifest(value: unknown): value is { version: 1; runs: unknown[] } {
+  return isRecord(value) && value.version === 1 && Array.isArray(value.runs);
+}
+
 export function mergeImportedRuns(bundled: NormalizedRun[], imported: NormalizedRun[]): NormalizedRun[] {
   const merged = [...bundled];
   const knownIdentities = new Set(bundled.map((run) => JSON.stringify([run.task, run.id])));
@@ -90,17 +95,39 @@ export function mergeImportedRuns(bundled: NormalizedRun[], imported: Normalized
   return merged;
 }
 
-export async function readImportedRuns(fetcher: typeof fetch = fetch): Promise<ParsedImportedRuns> {
-  try {
-    const response = await fetcher(IMPORT_MANIFEST_URL, {
-      next: { revalidate: 300, tags: ["melvynx-imports"] }
-    } as RequestInit);
+export function createImportedRunsReader(): ImportedRunsReader {
+  let lastKnownGoodRuns: NormalizedRun[] | null = null;
 
-    if (response.status === 404) return { runs: [], warnings: [] };
-    if (!response.ok) return { runs: [], warnings: ["Unable to refresh imported runs"] };
-
-    return parseImportedRunManifest(await response.json());
-  } catch {
-    return { runs: [], warnings: ["Unable to refresh imported runs"] };
+  function refreshFailure() {
+    return {
+      runs: lastKnownGoodRuns ? [...lastKnownGoodRuns] : [],
+      warnings: ["Unable to refresh imported runs"]
+    };
   }
+
+  return async (fetcher: typeof fetch = fetch): Promise<ParsedImportedRuns> => {
+    try {
+      const response = await fetcher(IMPORT_MANIFEST_URL, {
+        next: { revalidate: 300, tags: ["melvynx-imports"] }
+      } as RequestInit);
+
+      if (response.status === 404) {
+        return lastKnownGoodRuns === null
+          ? { runs: [], warnings: [] }
+          : refreshFailure();
+      }
+      if (!response.ok) return refreshFailure();
+
+      const value: unknown = await response.json();
+      if (!isImportedRunManifest(value)) return refreshFailure();
+
+      const parsed = parseImportedRunManifest(value);
+      lastKnownGoodRuns = [...parsed.runs];
+      return parsed;
+    } catch {
+      return refreshFailure();
+    }
+  };
 }
+
+export const readImportedRuns = createImportedRunsReader();

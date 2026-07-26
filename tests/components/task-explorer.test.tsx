@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TaskExplorer } from "../../src/components/task-explorer";
 import { TaskRunBrowser } from "../../src/components/task-run-browser";
 import type { NormalizedRun } from "../../src/lib/sources/types";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+});
 
 const cards = [
   {
@@ -104,6 +107,15 @@ describe("TaskExplorer", () => {
 
     expect(screen.getByText("1 run · 1 modèle")).toBeInTheDocument();
   });
+
+  it("announces only a compact result count outside the task grid", () => {
+    const { container } = render(<TaskExplorer cards={cards} />);
+    const liveRegions = container.querySelectorAll('[aria-live="polite"]');
+
+    expect(liveRegions).toHaveLength(1);
+    expect(liveRegions[0]).toHaveTextContent("2 tâches affichées");
+    expect(liveRegions[0].querySelector("article, iframe, a, button, input, dl")).toBeNull();
+  });
 });
 
 describe("TaskRunBrowser", () => {
@@ -147,5 +159,41 @@ describe("TaskRunBrowser", () => {
     expect(screen.getByText(/identifiant est partagé entre plusieurs tâches/i)).toBeInTheDocument();
     expect(screen.queryByTitle("Visual result for shared-run")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Voir le détail du run/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the active preview and metadata outside a compact live summary", () => {
+    const { container } = render(
+      <TaskRunBrowser
+        initialRunId="run-a"
+        prompt={null}
+        runs={[makeRun("run-a", "model-a")]}
+        task="gmail-clone"
+      />
+    );
+    const liveRegions = container.querySelectorAll('[aria-live="polite"]');
+
+    expect(liveRegions).toHaveLength(1);
+    expect(liveRegions[0]).toHaveTextContent("Run actif : model-a, run-a");
+    expect(liveRegions[0].querySelector("iframe, a, button, dl, section")).toBeNull();
+  });
+
+  it("formats a near-midnight publication date in UTC", () => {
+    vi.stubEnv("TZ", "Europe/Paris");
+    const nearMidnight = makeRun("near-midnight", "model-a", {
+      createdAt: "2026-01-01T23:30:00Z"
+    });
+
+    render(
+      <TaskRunBrowser
+        initialRunId="near-midnight"
+        prompt={null}
+        runs={[nearMidnight]}
+        task="gmail-clone"
+      />
+    );
+
+    expect(screen.getByRole("button", { name: /1 janv\. 2026/i })).toBeInTheDocument();
+    expect(screen.getAllByText("1 janv. 2026").length).toBeGreaterThan(0);
+    expect(screen.queryByText("2 janv. 2026")).not.toBeInTheDocument();
   });
 });

@@ -12,7 +12,7 @@ function formattedDate(value: string | null) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(date);
+    : new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeZone: "UTC" }).format(date);
 }
 
 function runMetadataLabel(run: NormalizedRun) {
@@ -104,7 +104,10 @@ export function TaskRunBrowser({
         </Link>
       </aside>
 
-      <section aria-live="polite" className="min-w-0">
+      <section className="min-w-0">
+        <p aria-atomic="true" aria-live="polite" className="sr-only" role="status">
+          Run actif : {activeRun.model ?? "modèle inconnu"}, {activeRun.id}
+        </p>
         {activeRunIsUnresolvable ? (
           <section className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-amber-400/40 bg-amber-400/5 px-6 text-center">
             <div>
