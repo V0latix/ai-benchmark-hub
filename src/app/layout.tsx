@@ -3,10 +3,10 @@ import "./globals.css";
 import { AppShell } from "../components/app-shell";
 
 export const metadata: Metadata = {
-  title: "AI Benchmark Hub",
-  description: "Compare public AI and coding-agent benchmark runs."
+  title: "Melvynx Benchmarks",
+  description: "Explorez les tâches Melvynx et comparez les runs de modèles IA."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body><AppShell>{children}</AppShell></body></html>;
+  return <html lang="fr"><body><AppShell>{children}</AppShell></body></html>;
 }
