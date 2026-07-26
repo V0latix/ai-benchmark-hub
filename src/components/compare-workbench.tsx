@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { benchmarkSources } from "../lib/sources/config";
 import type { NormalizedRun } from "../lib/sources/types";
+import { comparisonSearchSignature } from "../lib/tasks/comparison-url";
 import type { ComparisonSelection } from "../lib/tasks/view-model";
 import { RunMetadataGrid } from "./run-metadata-grid";
 import { RunVisual } from "./run-visual";
@@ -109,7 +110,13 @@ function CodeLinks({ label, run }: { label: "A" | "B"; run: NormalizedRun }) {
   );
 }
 
-export function CompareWorkbench({ selection }: { selection: ComparisonSelection }) {
+export function CompareWorkbench({
+  originQuerySignature,
+  selection
+}: {
+  originQuerySignature?: string;
+  selection: ComparisonSelection;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedPath = useRef<string | null>(null);
@@ -130,6 +137,8 @@ export function CompareWorkbench({ selection }: { selection: ComparisonSelection
   const canonicalPath = canonicalQuery ? `/compare?${canonicalQuery}` : "/compare";
   const currentQuery = searchParams.toString();
   const currentPath = currentQuery ? `/compare?${currentQuery}` : "/compare";
+  const currentQuerySignature = comparisonSearchSignature(searchParams);
+  const selectionOriginSignature = originQuerySignature ?? currentQuerySignature;
 
   function navigate(path: string) {
     requestedPath.current = path;
@@ -144,6 +153,8 @@ export function CompareWorkbench({ selection }: { selection: ComparisonSelection
   }
 
   useEffect(() => {
+    if (currentQuerySignature !== selectionOriginSignature) return;
+
     if (currentPath === canonicalPath) {
       if (requestedPath.current === null || requestedPath.current === currentPath) {
         requestedPath.current = null;
@@ -154,12 +165,12 @@ export function CompareWorkbench({ selection }: { selection: ComparisonSelection
 
     if (requestedPath.current === currentPath || requestedPath.current === canonicalPath) return;
 
-    const transition = `${currentPath}\u0000${canonicalPath}`;
+    const transition = `${selectionOriginSignature}\u0000${currentPath}\u0000${canonicalPath}`;
     if (lastCanonicalization.current === transition) return;
     lastCanonicalization.current = transition;
     requestedPath.current = canonicalPath;
     router.replace(canonicalPath, { scroll: false });
-  }, [canonicalPath, currentPath, router]);
+  }, [canonicalPath, currentPath, currentQuerySignature, router, selectionOriginSignature]);
 
   function replaceSelection(task: string, nextLeftId?: string, nextRightId?: string) {
     navigate(comparisonPath(task, nextLeftId, nextRightId));

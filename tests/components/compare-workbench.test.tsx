@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompareWorkbench } from "../../src/components/compare-workbench";
 import { RunMetadataGrid } from "../../src/components/run-metadata-grid";
 import { makeNormalizedRun } from "../fixtures/normalized-run";
+import { comparisonSearchSignature } from "../../src/lib/tasks/comparison-url";
 import { resolveComparison } from "../../src/lib/tasks/view-model";
 
 const navigation = vi.hoisted(() => ({
@@ -198,6 +199,49 @@ describe("CompareWorkbench", () => {
     replace.mockClear();
     navigation.query = "task=gmail-clone&left=run-a&right=run-b";
     rerender(<CompareWorkbench selection={selectionAB} />);
+
+    expect(screen.getByLabelText("Modèle A")).toHaveValue("model-a");
+    expect(screen.getByTitle("Visual result for run-a")).toBeInTheDocument();
+    expect(screen.queryByTitle("Visual result for run-c")).not.toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("waits for matching server-origin props when Back updates the URL first", () => {
+    const runs = [
+      makeNormalizedRun("run-a", { model: "model-a" }),
+      makeNormalizedRun("run-b", { model: "model-b" }),
+      makeNormalizedRun("run-c", { model: "model-c" })
+    ];
+    const selectionAB = resolveComparison(runs, {
+      task: "gmail-clone",
+      leftId: "run-a",
+      rightId: "run-b"
+    });
+    const selectionCB = resolveComparison(runs, {
+      task: "gmail-clone",
+      leftId: "run-c",
+      rightId: "run-b"
+    });
+    const queryAB = "task=gmail-clone&left=run-a&right=run-b";
+    const queryCB = "task=gmail-clone&left=run-c&right=run-b";
+    navigation.query = queryAB;
+
+    const { rerender } = render(
+      <CompareWorkbench
+        originQuerySignature={comparisonSearchSignature(new URLSearchParams(queryCB))}
+        selection={selectionCB}
+      />
+    );
+
+    expect(screen.getByTitle("Visual result for run-c")).toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
+
+    rerender(
+      <CompareWorkbench
+        originQuerySignature={comparisonSearchSignature(new URLSearchParams(queryAB))}
+        selection={selectionAB}
+      />
+    );
 
     expect(screen.getByLabelText("Modèle A")).toHaveValue("model-a");
     expect(screen.getByTitle("Visual result for run-a")).toBeInTheDocument();

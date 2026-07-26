@@ -1,13 +1,13 @@
 import { CompareWorkbench } from "../../components/compare-workbench";
 import { getComparisonSelection } from "../../lib/storage/queries";
+import {
+  comparisonSearchSignature,
+  type RawComparisonSearchParams
+} from "../../lib/tasks/comparison-url";
 
 export const dynamic = "force-dynamic";
 
-type CompareSearchParams = Promise<{
-  task?: string | string[];
-  left?: string | string[];
-  right?: string | string[];
-}>;
+type CompareSearchParams = Promise<RawComparisonSearchParams>;
 
 function singleValue(value: string | string[] | undefined) {
   return typeof value === "string" ? value : undefined;
@@ -32,7 +32,10 @@ export default async function ComparePage({ searchParams }: { searchParams: Comp
           Alternez entre deux résultats en plein format, puis alignez leurs détails et leurs artefacts source.
         </p>
       </header>
-      <CompareWorkbench selection={selection} />
+      <CompareWorkbench
+        originQuerySignature={comparisonSearchSignature(params)}
+        selection={selection}
+      />
     </section>
   );
 }
