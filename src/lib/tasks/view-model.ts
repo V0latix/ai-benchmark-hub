@@ -55,7 +55,7 @@ function sortRunsNewestFirst(runs: NormalizedRun[]): NormalizedRun[] {
 }
 
 function hasPreview(run: NormalizedRun) {
-  return Boolean(run.previewPath?.trim());
+  return Boolean(run.previewPath && run.task && run.previewPath.startsWith(`benchmarks/${run.task}/`));
 }
 
 function representativeRunId(runs: NormalizedRun[]) {

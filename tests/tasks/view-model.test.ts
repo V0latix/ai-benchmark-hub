@@ -20,6 +20,15 @@ describe("buildTaskCards", () => {
     });
   });
 
+  it("ignores a nonempty preview path outside the task preview directory", () => {
+    const cards = buildTaskCards([
+      run("invalid", { task: "gmail-clone", previewPath: "foo.html", createdAt: "2026-02-01T00:00:00Z" }),
+      run("valid", { task: "gmail-clone", previewPath: "benchmarks/gmail-clone/valid/index.html", createdAt: "2026-01-01T00:00:00Z" })
+    ]);
+
+    expect(cards[0].representativeRunId).toBe("valid");
+  });
+
   it("matches either a task name or one of its model names", () => {
     const cards = buildTaskCards([run("a", { task: "gmail-clone", model: "claude-sonnet-5" })], "sonnet");
 
