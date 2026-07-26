@@ -9,6 +9,7 @@ import { previewAssetVersion } from "./preview";
 
 const cssImport = /import\s+["']([^"']+\.css)["'];?/g;
 const assetImport = /import\s+([A-Za-z_$][\w$]*)\s+from\s+["']((?:\.{1,2}\/)[^"']+\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp|woff2?|ttf|otf))["'];?/gi;
+const tailwindPlugin = /@plugin\s+["'][^"']+["']\s*;?/g;
 const require = createRequire(join(process.cwd(), "package.json"));
 
 function rewriteModuleAliases(source: string, path: string): string {
@@ -43,6 +44,6 @@ export function extractTailwindCandidates(source: string): string[] {
 
 export async function compilePreviewStylesheet(source: string, candidates: string[]): Promise<string> {
   const tailwindStylesheet = await readFile(require.resolve("tailwindcss/index.css"), "utf8");
-  const compiler = await compile(source, { loadStylesheet: async (id) => ({ path: id, base: "", content: id === "tailwindcss" ? tailwindStylesheet : "" }) });
+  const compiler = await compile(source.replace(tailwindPlugin, ""), { loadStylesheet: async (id) => ({ path: id, base: "", content: id === "tailwindcss" ? tailwindStylesheet : "" }) });
   return compiler.build(candidates);
 }

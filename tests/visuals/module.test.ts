@@ -39,4 +39,10 @@ describe("preview module transform", () => {
     expect(extractTailwindCandidates('const card = "flex gap-4 bg-red-500"')).toEqual(expect.arrayContaining(["flex", "gap-4", "bg-red-500"]));
     expect(await compilePreviewStylesheet('@import "tailwindcss";', ["flex", "gap-4", "bg-red-500"])).toContain(".bg-red-500");
   });
+
+  it("compiles Tailwind styles without executing an artifact plugin", async () => {
+    const stylesheet = await compilePreviewStylesheet('@import "tailwindcss"; @plugin "tailwindcss-animate";', ["flex"]);
+
+    expect(stylesheet).toContain(".flex");
+  });
 });
