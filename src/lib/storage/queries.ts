@@ -1,6 +1,7 @@
 import type { NormalizedRun, SyncReport } from "../sources/types";
 import { mergeImportedRuns, readImportedRuns } from "./import-manifest";
 import { readBundledSnapshot, readLocalCache } from "./json-store";
+import { buildTaskCards, buildTaskDetail, resolveComparison, type ComparisonRequest } from "../tasks/view-model";
 
 export type RunFilters = { search?: string; source?: string; model?: string; status?: string; harness?: string; sort?: "cost" | "score" | "date" | "duration" };
 
@@ -36,6 +37,18 @@ export async function queryRuns(filters: RunFilters = {}) {
 }
 
 export async function getRunById(id: string) { return (await getCache()).runs.find((run) => run.id === id) ?? null; }
+
+export async function getTaskCards(query?: string) {
+  return buildTaskCards((await getCache()).runs, query);
+}
+
+export async function getTaskDetail(task: string) {
+  return buildTaskDetail((await getCache()).runs, task);
+}
+
+export async function getComparisonSelection(request: ComparisonRequest) {
+  return resolveComparison((await getCache()).runs, request);
+}
 
 export async function getTaskSummaries() {
   const { runs } = await getCache(); const tasks = new Map<string, { task: string; runCount: number; sourceIds: Set<string> }>();
