@@ -1,4 +1,4 @@
-import { strToU8, zipSync } from "fflate";
+import { strToU8, Zip, ZipDeflate, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 
 import { inspectArchive } from "../../src/lib/imports/archive";
@@ -58,6 +58,34 @@ function corruptStoredFile(data: Uint8Array, path: string) {
     offset += 46 + pathLength + view.getUint16(offset + 30, true) + view.getUint16(offset + 32, true);
   }
   throw new Error(`test ZIP has no ${path} entry`);
+}
+
+function makeDataDescriptorZip(path: string, bytes: Uint8Array) {
+  const chunks: Uint8Array[] = [];
+  const zip = new Zip((error, chunk) => {
+    if (error) throw error;
+    chunks.push(chunk);
+  });
+  const file = new ZipDeflate(path);
+  zip.add(file);
+  file.push(bytes, true);
+  zip.end();
+
+  const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const archive = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    archive.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return archive;
+}
+
+function forgeCentralCompressedBytes(data: Uint8Array, compressedBytes: number) {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const offset = centralDirectoryOffset(data);
+  expect(view.getUint16(offset + 8, true) & 0x0008).toBe(0x0008);
+  view.setUint32(offset + 20, compressedBytes, true);
 }
 
 describe("archive inspection", () => {
@@ -182,6 +210,13 @@ describe("archive inspection", () => {
     corruptStoredFile(tampered, "index.html");
 
     await expect(inspectArchive(tampered)).rejects.toThrow(/corrupt|CRC|checksum/i);
+  });
+
+  it("rejects data-descriptor entries before forged central compressed sizes can bypass validation", async () => {
+    const zip = makeDataDescriptorZip("index.html", strToU8("<html></html>"));
+    forgeCentralCompressedBytes(zip, 1);
+
+    await expect(inspectArchive(zip)).rejects.toThrow(/data descriptor|unsupported/i);
   });
 
   it("rejects an archive whose central-directory metadata exceeds the 75 MB expanded bound", async () => {

@@ -14,6 +14,7 @@ type ZipEntry = {
 
 const centralDirectorySignature = 0x02014b50;
 const endOfCentralDirectorySignature = 0x06054b50;
+const localFileHeaderSignature = 0x04034b50;
 const zip64Sentinel = 0xffff;
 const zip64OffsetSentinel = 0xffffffff;
 const supportedCompressionMethods = new Set([0, 8]);
@@ -88,10 +89,18 @@ function readZipEntries(data: Uint8Array): ZipEntry[] {
     const extraLength = view.getUint16(offset + 30, true);
     const commentLength = view.getUint16(offset + 32, true);
     const externalAttributes = view.getUint32(offset + 38, true);
+    const localOffset = view.getUint32(offset + 42, true);
     const nameStart = offset + 46;
     const nextOffset = nameStart + pathLength + extraLength + commentLength;
     if (nextOffset > endOffset) throw new Error("Archive central directory is malformed");
     if (!supportedCompressionMethods.has(compressionMethod)) throw new Error("Archive uses an unsupported compression method");
+    if (localOffset + 30 > data.byteLength || view.getUint32(localOffset, true) !== localFileHeaderSignature) {
+      throw new Error("Archive local file header is malformed");
+    }
+    const localFlags = view.getUint16(localOffset + 6, true);
+    if ((flags & 0x0008) !== 0 || (localFlags & 0x0008) !== 0) {
+      throw new Error("ZIP data descriptor entries are unsupported");
+    }
 
     const path = decodeZipName(data.subarray(nameStart, nameStart + pathLength), flags);
     const directory = path.endsWith("/");
