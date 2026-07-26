@@ -1,3 +1,5 @@
+import "server-only";
+
 export type AdminEnvironment = {
   passwordHash: string;
   sessionSecret: string;

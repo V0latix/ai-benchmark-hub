@@ -1,3 +1,5 @@
+import "server-only";
+
 import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 
@@ -29,7 +31,8 @@ function decodeBase64Url(value: string): Buffer | null {
   if (!isBase64Url(value)) return null;
 
   try {
-    return Buffer.from(value, "base64url");
+    const decoded = Buffer.from(value, "base64url");
+    return decoded.toString("base64url") === value ? decoded : null;
   } catch {
     return null;
   }
@@ -96,11 +99,13 @@ export function verifyAdminSession(token: string, secret: string, now = Date.now
   const [payload, signature, ...extra] = token.split(".");
   if (!payload || !signature || extra.length) return null;
 
+  const decodedPayload = decodeBase64Url(payload);
+  if (!decodedPayload) return null;
   const suppliedSignature = decodeBase64Url(signature);
   if (!fixedLengthEqual(hmac(payload, secret), suppliedSignature, SESSION_SIGNATURE_BYTES)) return null;
 
   try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as unknown;
+    const parsed = JSON.parse(decodedPayload.toString("utf8")) as unknown;
     return isAdminSession(parsed) && parsed.expiresAt > now ? parsed : null;
   } catch {
     return null;
