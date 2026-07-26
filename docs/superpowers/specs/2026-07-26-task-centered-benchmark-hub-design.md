@@ -106,11 +106,14 @@ The import wizard has four steps:
 1. **Identifier le run** — select an existing canonical task, enter the model
    name, select or confirm `lmarena` as the harness, choose the downloaded ZIP,
    and optionally provide generation time and a short note.
-2. **Valider l’archive** — inspect the archive without executing repository
-   code, derive a unique run ID and application slug, and report supported entry
-   points, detected framework, file counts, size, and warnings.
-3. **Prévisualiser** — upload the sanitized files to a temporary GitHub draft
-   branch and render them through the existing sandboxed preview pipeline.
+2. **Valider l’archive** — inspect the archive in the administrator's browser
+   without executing project code, derive a unique run ID and application slug,
+   and report supported entry points, detected framework, file counts, size,
+   and warnings. The server independently validates every extracted file before
+   accepting it.
+3. **Prévisualiser** — upload each sanitized file separately through bounded
+   server requests, assemble the signed file receipts into a temporary GitHub
+   draft branch, and render it through the existing sandboxed preview pipeline.
    Display the exact metadata that will be published.
 4. **Publier** — create one atomic commit on the latest `main`, update the
    imported-runs manifest, remove the temporary branch, revalidate application
@@ -136,7 +139,7 @@ or uploaded executable code. It treats the archive as untrusted data.
 Archive validation rejects:
 
 - uploads larger than 20 MB compressed or 75 MB expanded;
-- more than 1,000 files or a single file larger than 15 MB;
+- more than 1,000 files or a single file larger than 3 MB;
 - absolute paths, `..` traversal, ambiguous normalized paths, symlinks, device
   files, nested archives, and excessive compression ratios;
 - `.env` files, credential and key filenames, browser profiles, source maps,
@@ -145,9 +148,13 @@ Archive validation rejects:
 - package dependencies the safe preview runtime cannot resolve.
 
 Accepted content is limited to required project text plus common web images and
-fonts. File names and text metadata are normalized before publication. The
-interactive preview remains in a sandboxed iframe with the existing restrictive
-CSP, storage shim, bounded file access, and no form submission.
+fonts. File names and text metadata are normalized before publication. Browser
+inspection is only an early usability check: the server repeats path, size,
+type, secret-name, and text-content validation for every extracted file. This
+chunked file protocol keeps every request below Vercel's 4.5 MB function body
+limit without adding another storage service. The interactive preview remains
+in a sandboxed iframe with the existing restrictive CSP, storage shim, bounded
+file access, and no form submission.
 
 ## GitHub draft and publication protocol
 
@@ -155,10 +162,13 @@ CSP, storage shim, bounded file access, and no form submission.
 access only to `Melvynx/benchmarks`. The app never accepts a repository name,
 owner, or branch from the client.
 
-Validation creates `imports/<draft-id>` from the latest `main` and writes only
-the sanitized run files. The app returns a signed draft identifier, not an
-arbitrary Git ref. Draft preview routes accept only that signed identifier and
-the active admin session.
+Each accepted file is written as a Git blob and returns a signed receipt binding
+its draft ID, normalized path, blob SHA, size, and content type. Finalization
+rejects missing, duplicate, invalid, expired, or cross-draft receipts and
+rechecks aggregate limits and required entry points. It then creates
+`imports/<draft-id>` from the latest `main` using only those verified blobs. The
+app returns a signed draft identifier, not an arbitrary Git ref. Draft preview
+routes accept only that signed identifier and the active admin session.
 
 `Melvynx/benchmarks` is public, so a temporary draft branch is technically
 readable by someone who already knows its unpredictable name even though the app
