@@ -19,6 +19,10 @@ const bundledSnapshot: CachePayload = {
   }
 };
 
+export function readBundledSnapshot(): CachePayload {
+  return bundledSnapshot;
+}
+
 export function getDefaultCacheRoot(cwd = process.cwd(), isVercel = Boolean(process.env.VERCEL)): string {
   return isVercel ? join("/tmp", "benchmark-hub") : join(cwd, ".cache", "benchmark-hub");
 }
@@ -35,7 +39,7 @@ export async function writeCache(payload: CachePayload, root = getDefaultCacheRo
   await writeJson(join(root, "sync-report.json"), payload.report);
 }
 
-export async function readCache(root = getDefaultCacheRoot()): Promise<CachePayload> {
+export async function readLocalCache(root = getDefaultCacheRoot()): Promise<CachePayload | null> {
   try {
     const [runs, report] = await Promise.all([
       readFile(join(root, "runs.json"), "utf8").then((content) => JSON.parse(content) as NormalizedRun[]),
@@ -43,6 +47,10 @@ export async function readCache(root = getDefaultCacheRoot()): Promise<CachePayl
     ]);
     return { runs, report };
   } catch {
-    return bundledSnapshot;
+    return null;
   }
+}
+
+export async function readCache(root = getDefaultCacheRoot()): Promise<CachePayload> {
+  return await readLocalCache(root) ?? bundledSnapshot;
 }

@@ -1,7 +1,7 @@
-import type { BenchmarkSource } from "./types";
+import { MELVYNX_SOURCE_ID, MELVYNX_SOURCE_REPO, type BenchmarkSource } from "./types";
 
 export const benchmarkSources: BenchmarkSource[] = [
-  { id: "melvynx-benchmarks", repo: "Melvynx/benchmarks", branch: "main", adapter: "melvynx", enabled: true, allowlist: ["transcripts.json", "runs/**/data/**/metadata.json", "benchmarks/**/index.html", "benchmarks/**/dist/index.html", "prompts/**/v*.md"] },
+  { id: MELVYNX_SOURCE_ID, repo: MELVYNX_SOURCE_REPO, branch: "main", adapter: "melvynx", enabled: true, allowlist: ["transcripts.json", "imports/index.json", "runs/**/data/**/metadata.json", "benchmarks/**/index.html", "benchmarks/**/dist/index.html", "prompts/**/v*.md"] },
   { id: "akita-rails-benchmark", repo: "akitaonrails/llm-coding-benchmark", branch: "master", adapter: "akita", enabled: true, allowlist: ["docs/report.md", "results/**/result.json", "results/**/*.log", "results/**/*.md"] },
   { id: "codescalebench", repo: "sourcegraph/CodeScaleBench", branch: "public", adapter: "codescalebench", enabled: true, allowlist: ["runs/snapshots/**/SNAPSHOT.json", "runs/snapshots/**/export/summary/**", "runs/snapshots/**/export/traces/**"] },
   { id: "swebench-experiments", repo: "SWE-bench/experiments", branch: "main", adapter: "swebench", enabled: true, allowlist: ["evaluation/**/metadata.yaml", "evaluation/**/metadata.yml", "**/all_preds.jsonl", "**/preds.json"] },

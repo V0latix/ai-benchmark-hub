@@ -1,10 +1,22 @@
 import type { NormalizedRun, SyncReport } from "../sources/types";
-import { readCache } from "./json-store";
+import { mergeImportedRuns, readImportedRuns } from "./import-manifest";
+import { readBundledSnapshot, readLocalCache } from "./json-store";
 
 export type RunFilters = { search?: string; source?: string; model?: string; status?: string; harness?: string; sort?: "cost" | "score" | "date" | "duration" };
 
-export async function getCache() {
-  try { return await readCache(); } catch { return { runs: [] as NormalizedRun[], report: { generatedAt: null, sources: [] } as SyncReport }; }
+export type QueryCache = { runs: NormalizedRun[]; report: SyncReport; freshnessWarnings: string[] };
+
+export async function getCache(): Promise<QueryCache> {
+  try {
+    const localCache = process.env.VERCEL ? null : await readLocalCache();
+    if (localCache) return { ...localCache, freshnessWarnings: [] };
+
+    const imported = await readImportedRuns();
+    const bundled = readBundledSnapshot();
+    return { ...bundled, runs: mergeImportedRuns(bundled.runs, imported.runs), freshnessWarnings: imported.warnings };
+  } catch {
+    return { runs: [] as NormalizedRun[], report: { generatedAt: null, sources: [] } as SyncReport, freshnessWarnings: ["Unable to load benchmark runs"] };
+  }
 }
 
 export async function getSyncReport() {

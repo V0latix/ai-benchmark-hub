@@ -1,5 +1,9 @@
 export type RunStatus = "success" | "failed" | "partial" | "timeout" | "unknown";
 
+export const MELVYNX_SOURCE_ID = "melvynx-benchmarks";
+export const MELVYNX_SOURCE_REPO = "Melvynx/benchmarks";
+export const MELVYNX_SOURCE_URL = "https://github.com/Melvynx/benchmarks";
+
 export type NormalizedRun = {
   id: string;
   sourceId: string;
