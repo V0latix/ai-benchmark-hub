@@ -11,6 +11,7 @@
 ## Global Constraints
 
 - `Melvynx/benchmarks` is the only public source of truth.
+- Existing Melvynx tasks, runs, metadata, and preview paths remain unchanged.
 - Every visitor can browse every published task and run without an account.
 - Model comparison always starts with one task and two distinct runs from that task.
 - The primary comparison interaction is an alternating full-size preview; split view is secondary and desktop-only.
@@ -126,8 +127,9 @@ with `next: { revalidate: 300, tags: ["melvynx-imports"] }`, return an empty
 overlay on `404`, and return a non-throwing freshness warning on network or
 schema failure.
 
-Add `imports/index.json` to the sole source allowlist. Remove every
-`BenchmarkSource` entry except `melvynx-benchmarks`.
+Add `imports/index.json` to the `melvynx-benchmarks` allowlist. Keep the other
+configured sources temporarily so Task 6 can remove them with its required
+red-green test.
 
 - [ ] **Step 4: Merge the overlay in the query boundary**
 

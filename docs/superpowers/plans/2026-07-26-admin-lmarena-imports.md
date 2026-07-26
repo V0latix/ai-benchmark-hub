@@ -24,6 +24,8 @@ Vitest jsdom setup.
 - Maximum extracted file count is 1,000; maximum individual file size is 3 MB.
 - Every server request stays below Vercel's 4.5 MB body limit.
 - Published artifacts remain compatible with the existing Melvynx adapter and preview sandbox.
+- Existing Melvynx task, run, metadata, and preview paths are immutable; reject
+  every collision instead of overwriting.
 - GitHub `main` updates are fast-forward only; never force-push.
 
 ---
@@ -645,10 +647,11 @@ it("rebuilds once against a new main head after a non-fast-forward conflict", as
 
 - [ ] **Step 2: Write failing idempotency and cleanup tests**
 
-Test an already-present run ID, a failed branch deletion after successful
-publish, canceling a draft, deleting only stale timestamped import branches,
-retaining recent drafts, and rejecting any draft tree entry outside its exact
-artifact and metadata prefixes.
+Test an already-present run ID, application slug, metadata path, and artifact
+path; every collision must fail before a main commit is created. Also test a
+failed branch deletion after successful publish, canceling a draft, deleting
+only stale timestamped import branches, retaining recent drafts, and rejecting
+any draft tree entry outside its exact artifact and metadata prefixes.
 
 - [ ] **Step 3: Run tests and verify failures**
 
@@ -660,8 +663,9 @@ Expected: FAIL because the publish service is missing.
 
 Read the latest main head and manifest, validate the draft tree, append exactly
 one normalized run, create a main-based tree, create a commit, and update `main`
-with `force:false`. On conflict, repeat from the latest head once. Treat an
-existing identical ID as idempotent success; reject a conflicting ID.
+with `force:false`. On conflict, repeat from the latest head once. Reject every
+existing run ID or destination path, including identical content, so no
+pre-existing Melvynx task or run can be replaced.
 
 - [ ] **Step 5: Implement publish and cancel routes**
 
@@ -852,7 +856,9 @@ Run `pnpm dev`, then verify:
 
 1. logged-out admin cannot access import mutations;
 2. correct login opens the wizard;
-3. a tiny static ZIP reaches preview with a test repository writer;
+3. a tiny static ZIP reaches preview in the automated integration test using
+   `InMemoryGitWriter`—do not point the development server at the real
+   repository during implementation;
 4. a traversal ZIP is rejected before upload;
 5. public Explorer and comparison still work with no admin env configured.
 

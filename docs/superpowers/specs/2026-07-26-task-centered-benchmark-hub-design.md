@@ -10,6 +10,9 @@ preview it, validate it, and publish it for every visitor.
 ## Product decisions
 
 - `Melvynx/benchmarks` is the only public source of truth.
+- Every task, run, metadata file, and preview artifact already present in
+  `Melvynx/benchmarks` is immutable; imports may only add previously unused
+  paths and append a new manifest entry.
 - Every visitor can browse every published task and run without an account.
 - Only the administrator can import and publish a run.
 - The administrator signs in with one server-configured password. User accounts
@@ -179,6 +182,8 @@ persistence system.
 
 Publishing reads the current `main` again, creates a new tree containing the
 draft artifact, run metadata, and manifest update, and creates one new commit.
+It rejects any run ID, application slug, metadata path, or artifact path that
+already exists on `main`; it never replaces an existing task or run file.
 It then advances `main` only when the expected parent still matches. If `main`
 changed, publication rebuilds against the new head and retries once. It never
 force-pushes.
