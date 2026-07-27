@@ -248,6 +248,24 @@ describe("import draft service", () => {
     expect([...writer.refs.keys()].filter((branch) => branch.startsWith("imports/"))).toEqual([first.branch]);
   });
 
+  it("never lets a near-expiry preview token outlive its deterministic branch cleanup epoch", async () => {
+    const expiresAt = NOW + IMPORT_TOKEN_TTL_MS;
+    const input = { metadata, receipts: [receipt()], draftId: DRAFT_ID };
+    const writer = new InMemoryGitWriter();
+    const result = await finalizeDraft(input, writer, SECRET, { now: expiresAt - 1 });
+
+    expect(verifyDraftToken(result.draftToken, SECRET, DRAFT_ID, expiresAt - 1)?.expiresAt).toBe(expiresAt);
+    await cleanupStaleDrafts(writer, expiresAt - 1);
+    expect(writer.refs.has(result.branch)).toBe(true);
+    await cleanupStaleDrafts(writer, expiresAt + 1_000);
+    expect(writer.refs.has(result.branch)).toBe(false);
+
+    const expiredWriter = new InMemoryGitWriter();
+    await expect(finalizeDraft(input, expiredWriter, SECRET, { now: expiresAt }))
+      .rejects.toThrow(/expired|receipt/i);
+    expect([...expiredWriter.refs.keys()].filter((branch) => branch.startsWith("imports/"))).toHaveLength(0);
+  });
+
   it("creates upload authority from 128 injected random bits and treats stale cleanup as best effort", async () => {
     class BrokenCleanupWriter extends InMemoryGitWriter {
       override async listBranches(): Promise<string[]> {

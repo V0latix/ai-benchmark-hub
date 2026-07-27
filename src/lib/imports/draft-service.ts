@@ -283,7 +283,8 @@ export async function finalizeDraft(
     treeSha,
     mainHead.commitSha
   );
-  const draftCreatedAt = Math.min(...receipts.map((receipt) => receipt.expiresAt)) - IMPORT_TOKEN_TTL_MS;
+  const receiptAuthorityExpiresAt = Math.min(...receipts.map((receipt) => receipt.expiresAt));
+  const draftCreatedAt = receiptAuthorityExpiresAt - IMPORT_TOKEN_TTL_MS;
   const branch = `imports/${Math.floor(draftCreatedAt / 1_000)}-${input.draftId}`;
   await writer.createBranch(branch, commitSha);
 
@@ -295,7 +296,7 @@ export async function finalizeDraft(
     task: metadata.task,
     appSlug: metadata.appSlug,
     runId: metadata.runId,
-    expiresAt: now + IMPORT_TOKEN_TTL_MS
+    expiresAt: Math.min(receiptAuthorityExpiresAt, now + IMPORT_TOKEN_TTL_MS)
   }, secret);
   return {
     draftId: input.draftId,
