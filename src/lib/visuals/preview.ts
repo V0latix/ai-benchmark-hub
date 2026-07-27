@@ -21,6 +21,10 @@ export function getPreviewVendorUrl(assetBaseUrl: string, modulePath: string): s
   return `${vendorBaseUrl}/${modulePath.split("/").map((segment) => encodeURIComponent(segment).replace(/%40/gi, "@")).join("/")}`;
 }
 
+function withPreviewAuthorization(url: string, previewToken?: string): string {
+  return previewToken ? `${url}${url.includes("?") ? "&" : "?"}preview=${encodeURIComponent(previewToken)}` : url;
+}
+
 export function getPreviewAssetUrl(runId: string, path: string): string {
   return `${getPreviewAssetBaseUrl(runId)}/${path.split("/").map(encodeURIComponent).join("/")}?preview=${previewAssetVersion}`;
 }
@@ -38,26 +42,26 @@ function injectPreviewBootstrap(html: string, bootstrap: string): string {
   return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${bootstrap}</body>`) : `${html}${bootstrap}`;
 }
 
-function rewritePreviewRootUrls(html: string, assetBaseUrl: string): string {
-  return html.replace(/\b(src|href)=["']\/(?!\/)/gi, `$1="${assetBaseUrl}/`);
+function rewritePreviewRootUrls(html: string, assetBaseUrl: string, previewToken?: string): string {
+  return html.replace(/\b(src|href)=(["'])\/(?!\/)([^"']*)\2/gi, (_match, attribute, _quote, path) => `${attribute}="${withPreviewAuthorization(`${assetBaseUrl}/${path}`, previewToken)}"`);
 }
 
 function previewStorageShim(): string {
   return `<script>window.addEventListener("error", (event) => { document.documentElement.dataset.previewError = event.message; }); window.addEventListener("unhandledrejection", (event) => { document.documentElement.dataset.previewError = String(event.reason); }); document.documentElement.dataset.previewBootstrap = "ready"; const previewStorage = new Map(); const previewStorageApi = { getItem: (key) => previewStorage.get(String(key)) ?? null, setItem: (key, value) => previewStorage.set(String(key), String(value)), removeItem: (key) => previewStorage.delete(String(key)), clear: () => previewStorage.clear(), key: (index) => Array.from(previewStorage.keys())[index] ?? null, get length() { return previewStorage.size; } }; try { Object.defineProperty(globalThis, "localStorage", { value: previewStorageApi }); } catch {}</script>`;
 }
 
-export function injectInteractivePreview(html: string, assetBaseUrl: string, dependencies: Record<string, string>): string {
+export function injectInteractivePreview(html: string, assetBaseUrl: string, dependencies: Record<string, string>, previewToken?: string): string {
   const imports = Object.fromEntries(Object.entries(dependencies).flatMap(([name, version]) => {
     const packagePath = `${name}@${version}`;
-    return [[name, getPreviewVendorUrl(assetBaseUrl, packagePath)], [`${name}/`, `${getPreviewVendorUrl(assetBaseUrl, packagePath)}/`]];
+    return [[name, withPreviewAuthorization(getPreviewVendorUrl(assetBaseUrl, packagePath), previewToken)], [`${name}/`, withPreviewAuthorization(`${getPreviewVendorUrl(assetBaseUrl, packagePath)}/`, previewToken)]];
   }));
-  const entry = `${assetBaseUrl}/src/main.tsx?preview=${previewAssetVersion}`;
+  const entry = withPreviewAuthorization(`${assetBaseUrl}/src/main.tsx?preview=${previewAssetVersion}`, previewToken);
   const withoutViteEntry = html.replace(/<script\b[^>]*\bsrc=["']\/src\/[^"']+["'][^>]*><\/script>/i, "");
-  const rewrittenRoots = rewritePreviewRootUrls(withoutViteEntry, assetBaseUrl);
+  const rewrittenRoots = rewritePreviewRootUrls(withoutViteEntry, assetBaseUrl, previewToken);
   const moduleLoader = `<script>const previewEntry = document.createElement("script"); previewEntry.type = "module"; previewEntry.src = ${JSON.stringify(entry)}; previewEntry.onerror = () => { document.documentElement.dataset.previewError = "Entry module failed to load"; }; document.body.append(previewEntry);</script>`;
   return injectPreviewBootstrap(rewrittenRoots, `${previewStorageShim()}<script type="importmap">${JSON.stringify({ imports })}</script>${moduleLoader}`);
 }
 
-export function injectStandalonePreview(html: string, assetBaseUrl: string): string {
-  return injectPreviewBootstrap(rewritePreviewRootUrls(html, assetBaseUrl), previewStorageShim());
+export function injectStandalonePreview(html: string, assetBaseUrl: string, previewToken?: string): string {
+  return injectPreviewBootstrap(rewritePreviewRootUrls(html, assetBaseUrl, previewToken), previewStorageShim());
 }

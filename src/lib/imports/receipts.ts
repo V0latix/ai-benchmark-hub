@@ -9,6 +9,7 @@ const SIGNATURE_BYTES = 32;
 const PURPOSE = {
   draft: "import-draft",
   file: "import-file",
+  preview: "import-preview",
   upload: "import-upload"
 } as const;
 const draftIdPattern = /^[a-f0-9]{32,}$/;
@@ -17,6 +18,7 @@ const branchPattern = /^imports\/[0-9]{10,}-[a-f0-9]{32,}$/;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export const IMPORT_TOKEN_TTL_MS = 24 * 60 * 60 * 1_000;
+export const PREVIEW_TOKEN_TTL_MS = 5 * 60 * 1_000;
 
 export type UploadTokenPayload = {
   version: 1;
@@ -44,6 +46,17 @@ export type DraftTokenPayload = {
   runId: string;
   expiresAt: number;
 };
+
+export type PreviewTokenPayload = {
+  version: 1;
+  draftId: string;
+  commitSha: string;
+  task: string;
+  appSlug: string;
+  expiresAt: number;
+};
+
+export type PreviewTokenBinding = Pick<PreviewTokenPayload, "draftId" | "commitSha" | "task" | "appSlug">;
 
 function hasExactKeys(value: object, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
@@ -116,6 +129,22 @@ function isDraftTokenPayload(value: unknown): value is DraftTokenPayload {
     && isSafeExpiry(payload.expiresAt);
 }
 
+function isPreviewTokenPayload(value: unknown): value is PreviewTokenPayload {
+  if (!value || typeof value !== "object") return false;
+  const payload = value as Partial<PreviewTokenPayload>;
+  return hasExactKeys(value, ["version", "draftId", "commitSha", "task", "appSlug", "expiresAt"])
+    && payload.version === 1
+    && typeof payload.draftId === "string"
+    && draftIdPattern.test(payload.draftId)
+    && typeof payload.commitSha === "string"
+    && gitShaPattern.test(payload.commitSha)
+    && typeof payload.task === "string"
+    && slugPattern.test(payload.task)
+    && typeof payload.appSlug === "string"
+    && slugPattern.test(payload.appSlug)
+    && isSafeExpiry(payload.expiresAt);
+}
+
 function canonicalUploadToken(payload: UploadTokenPayload): UploadTokenPayload {
   return { version: 1, draftId: payload.draftId, expiresAt: payload.expiresAt };
 }
@@ -141,6 +170,17 @@ function canonicalDraftToken(payload: DraftTokenPayload): DraftTokenPayload {
     task: payload.task,
     appSlug: payload.appSlug,
     runId: payload.runId,
+    expiresAt: payload.expiresAt
+  };
+}
+
+function canonicalPreviewToken(payload: PreviewTokenPayload): PreviewTokenPayload {
+  return {
+    version: 1,
+    draftId: payload.draftId,
+    commitSha: payload.commitSha,
+    task: payload.task,
+    appSlug: payload.appSlug,
     expiresAt: payload.expiresAt
   };
 }
@@ -231,4 +271,31 @@ export function verifyDraftToken(
 ): DraftTokenPayload | null {
   const payload = verify(token, PURPOSE.draft, secret, isDraftTokenPayload);
   return payload && payload.draftId === expectedDraftId && payload.expiresAt > now ? payload : null;
+}
+
+export function signPreviewToken(payload: PreviewTokenPayload, secret: string): string {
+  if (!isPreviewTokenPayload(payload)) throw new Error("Invalid preview token payload");
+  return sign(PURPOSE.preview, canonicalPreviewToken(payload), secret);
+}
+
+export function verifyPreviewToken(
+  token: string,
+  secret: string,
+  expected: PreviewTokenBinding,
+  now = Date.now()
+): PreviewTokenPayload | null {
+  const payload = verify(token, PURPOSE.preview, secret, isPreviewTokenPayload);
+  return payload
+    && payload.draftId === expected.draftId
+    && payload.commitSha === expected.commitSha
+    && payload.task === expected.task
+    && payload.appSlug === expected.appSlug
+    && payload.expiresAt > now
+    ? payload
+    : null;
+}
+
+export function verifyPreviewTokenForDraft(token: string, secret: string, draftId: string, now = Date.now()): PreviewTokenPayload | null {
+  const payload = verify(token, PURPOSE.preview, secret, isPreviewTokenPayload);
+  return payload && payload.draftId === draftId && payload.expiresAt > now ? payload : null;
 }
