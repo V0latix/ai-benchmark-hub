@@ -266,6 +266,26 @@ describe("import draft service", () => {
     expect([...expiredWriter.refs.keys()].filter((branch) => branch.startsWith("imports/"))).toHaveLength(0);
   });
 
+  it("rounds a sub-second draft start up so cleanup cannot overlap a valid preview token", async () => {
+    const draftStartedAt = NOW + 500;
+    const expiresAt = draftStartedAt + IMPORT_TOKEN_TTL_MS;
+    const cleanupAt = Math.ceil(draftStartedAt / 1_000) * 1_000 + IMPORT_TOKEN_TTL_MS;
+    const writer = new InMemoryGitWriter();
+    const result = await finalizeDraft(
+      { metadata, receipts: [receipt({ expiresAt })], draftId: DRAFT_ID },
+      writer,
+      SECRET,
+      { now: draftStartedAt }
+    );
+
+    expect(result.branch).toBe(`imports/${Math.ceil(draftStartedAt / 1_000)}-${DRAFT_ID}`);
+    expect(verifyDraftToken(result.draftToken, SECRET, DRAFT_ID, expiresAt - 1)).not.toBeNull();
+    await cleanupStaleDrafts(writer, expiresAt - 1);
+    expect(writer.refs.has(result.branch)).toBe(true);
+    await cleanupStaleDrafts(writer, cleanupAt);
+    expect(writer.refs.has(result.branch)).toBe(false);
+  });
+
   it("creates upload authority from 128 injected random bits and treats stale cleanup as best effort", async () => {
     class BrokenCleanupWriter extends InMemoryGitWriter {
       override async listBranches(): Promise<string[]> {

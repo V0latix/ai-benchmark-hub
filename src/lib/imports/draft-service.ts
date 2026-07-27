@@ -204,7 +204,7 @@ export async function cleanupStaleDrafts(writer: BenchmarkGitWriter, now = Date.
     const match = staleBranchPattern.exec(branch);
     if (!match) return false;
     const createdAt = Number(match[1]) * 1_000;
-    return Number.isSafeInteger(createdAt) && createdAt < threshold;
+    return Number.isSafeInteger(createdAt) && createdAt <= threshold;
   });
   await Promise.allSettled(stale.map((branch) => writer.deleteBranch(branch)));
 }
@@ -285,7 +285,7 @@ export async function finalizeDraft(
   );
   const receiptAuthorityExpiresAt = Math.min(...receipts.map((receipt) => receipt.expiresAt));
   const draftCreatedAt = receiptAuthorityExpiresAt - IMPORT_TOKEN_TTL_MS;
-  const branch = `imports/${Math.floor(draftCreatedAt / 1_000)}-${input.draftId}`;
+  const branch = `imports/${Math.ceil(draftCreatedAt / 1_000)}-${input.draftId}`;
   await writer.createBranch(branch, commitSha);
 
   const draftToken = signDraftToken({
