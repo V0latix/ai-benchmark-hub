@@ -2,7 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
-    "/api/runs/\\[id\\]/visual/asset/\\[\\.\\.\\.path\\]": ["./node_modules/tailwindcss/index.css"]
+    "/api/runs/\\[id\\]/visual/asset/\\[\\.\\.\\.path\\]": ["./node_modules/tailwindcss/index.css"],
+    "/api/admin/imports/\\[draftId\\]/visual/asset/\\[\\.\\.\\.path\\]": ["./node_modules/tailwindcss/index.css"]
   }
 };
 

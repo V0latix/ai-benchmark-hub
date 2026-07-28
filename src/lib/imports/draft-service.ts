@@ -3,7 +3,7 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 
 import type { BenchmarkGitWriter, GitTreeEntry } from "../github/write-client";
-import { getMelvynxTaskPrompt } from "../tasks/catalog";
+import { isMelvynxTask } from "../tasks/catalog";
 import { importPathKey } from "./policy";
 import {
   createDraftId,
@@ -84,7 +84,7 @@ function normalizedText(value: unknown, field: string, maxLength: number): strin
 function normalizeMetadata(value: DraftMetadataInput): NormalizedDraftMetadata {
   if (!value || typeof value !== "object") throw new Error("Invalid import metadata");
   const task = normalizedText(value.task, "task", 100);
-  if (!getMelvynxTaskPrompt(task)) throw new Error("Import task is not canonical");
+  if (!isMelvynxTask(task)) throw new Error("Import task is not canonical");
   const model = normalizedText(value.model, "model", 100);
   if (value.harness !== "lmarena") throw new Error("Import harness must be lmarena");
 

@@ -155,6 +155,44 @@ describe("admin import routes", () => {
     }
   });
 
+  it("accepts text at 750,000 bytes and rejects text at 750,001 bytes without creating the oversized blob", async () => {
+    const uploadToken = signUploadToken({
+      version: 1,
+      draftId: DRAFT_ID,
+      expiresAt: NOW + IMPORT_TOKEN_TTL_MS
+    }, SECRET);
+    const base = {
+      ...adminHeaders(),
+      "content-type": "application/octet-stream",
+      "x-import-upload-token": uploadToken,
+      "x-import-content-type": encodeURIComponent("text/plain")
+    };
+
+    const acceptedWriter = new InMemoryGitWriter();
+    const accepted = new Uint8Array(750_000).fill(0x61);
+    const acceptedResponse = await createUploadImportFileHandler(routeDependencies(acceptedWriter))(
+      rawRequest("/api/admin/imports/files", accepted, {
+        ...base,
+        "content-length": String(accepted.byteLength),
+        "x-import-path": encodeURIComponent("assets/bounded.txt")
+      })
+    );
+    expect(acceptedResponse.status).toBe(200);
+    expect(acceptedWriter.blobs.size).toBe(1);
+
+    const rejectedWriter = new InMemoryGitWriter();
+    const rejected = new Uint8Array(750_001).fill(0x61);
+    const rejectedResponse = await createUploadImportFileHandler(routeDependencies(rejectedWriter))(
+      rawRequest("/api/admin/imports/files", rejected, {
+        ...base,
+        "content-length": String(rejected.byteLength),
+        "x-import-path": encodeURIComponent("assets/too-large.txt")
+      })
+    );
+    expect(rejectedResponse.status).toBe(400);
+    expect(rejectedWriter.blobs.size).toBe(0);
+  });
+
   it("rejects expired upload authority and unsafe content without reflecting private details", async () => {
     const cases = [
       {

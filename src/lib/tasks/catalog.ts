@@ -1,3 +1,6 @@
+import melvynxSnapshot from "../../data/melvynx-runs.snapshot.json";
+import type { NormalizedRun } from "../sources/types";
+
 export type MelvynxTaskPrompt = { slug: string; path: string };
 
 const prompts: Record<string, MelvynxTaskPrompt> = {
@@ -22,6 +25,20 @@ const prompts: Record<string, MelvynxTaskPrompt> = {
   "timezone-checker": { slug: "timezone-checker", path: "prompts/timezone-checker/v1.md" },
   "youtube-thumbnail": { slug: "youtube-thumbnail-generator", path: "prompts/youtube-thumbnail-generator/v1.md" }
 };
+
+export const MELVYNX_TASKS: readonly string[] = Object.freeze(
+  [...new Set(
+    (melvynxSnapshot as NormalizedRun[])
+      .map((run) => run.task)
+      .filter((task): task is string => Boolean(task))
+  )].sort()
+);
+
+const melvynxTasks = new Set(MELVYNX_TASKS);
+
+export function isMelvynxTask(task: string): boolean {
+  return melvynxTasks.has(task);
+}
 
 export function getMelvynxTaskPrompt(task: string): MelvynxTaskPrompt | null {
   return prompts[task] ?? null;

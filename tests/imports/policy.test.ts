@@ -98,4 +98,29 @@ describe("import file policy", () => {
       })
     ).toThrow(/3 MB/i);
   });
+
+  it("accepts text at 750,000 bytes and rejects it at 750,001 bytes before decoding", () => {
+    expect(validateImportFile({
+      path: "assets/bounded.txt",
+      bytes: new Uint8Array(750_000).fill(0x61),
+      contentType: "text/plain"
+    })).toMatchObject({ text: true });
+
+    expect(() => validateImportFile({
+      path: "assets/too-large.txt",
+      bytes: new Uint8Array(750_001).fill(0x61),
+      contentType: "text/plain"
+    })).toThrow(/750,000-byte text limit/i);
+  });
+
+  it("keeps safe binary assets eligible up to the shared three-megabyte bound", () => {
+    const bytes = new Uint8Array(750_001);
+    bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+
+    expect(validateImportFile({
+      path: "assets/large.png",
+      bytes,
+      contentType: "image/png"
+    })).toMatchObject({ text: false });
+  });
 });

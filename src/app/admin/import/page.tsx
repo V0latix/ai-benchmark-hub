@@ -4,7 +4,7 @@ import { AdminImportWizard } from "../../../components/admin-import-wizard";
 import { AdminLoginForm } from "../../../components/admin-login-form";
 import { verifyAdminSession } from "../../../lib/admin/auth";
 import { readAdminEnvironment } from "../../../lib/admin/env";
-import { getTaskCards } from "../../../lib/storage/queries";
+import { MELVYNX_TASKS } from "../../../lib/tasks/catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -40,8 +40,7 @@ export default async function AdminImportPage() {
   }
 
   if (csrf) {
-    const tasks = (await getTaskCards()).map((card) => card.task);
-    return <AdminImportWizard csrf={csrf} tasks={tasks} />;
+    return <AdminImportWizard csrf={csrf} tasks={MELVYNX_TASKS} />;
   }
   return <LoginView />;
 }

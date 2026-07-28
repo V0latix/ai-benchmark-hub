@@ -180,12 +180,20 @@ describe("archive inspection", () => {
     await expect(inspectArchive(new Uint8Array(20_000_001))).rejects.toThrow(/20 MB/i);
   });
 
-  it("rejects archives with more than one thousand files before extraction", async () => {
+  it("rejects archives with more than one thousand file entries before extraction", async () => {
     const files = Object.fromEntries(
       Array.from({ length: 1_001 }, (_, index) => [`download/${index}.txt`, strToU8("x")])
     );
 
-    await expect(inspectArchive(zipSync(files))).rejects.toThrow(/1,000 files/i);
+    await expect(inspectArchive(zipSync(files))).rejects.toThrow(/1,000 entries/i);
+  });
+
+  it("rejects archives with more than one thousand total entries, including directories", async () => {
+    const directories = Object.fromEntries(
+      Array.from({ length: 1_001 }, (_, index) => [`folders/${index}/`, new Uint8Array()])
+    );
+
+    await expect(inspectArchive(zipSync(directories))).rejects.toThrow(/1,000 entries/i);
   });
 
   it("rejects archives whose metadata exceeds the expanded or individual-file bounds", async () => {
@@ -246,5 +254,15 @@ describe("archive inspection", () => {
       const zip = zipSync({ [path]: strToU8("<html></html>") });
       await expect(inspectArchive(zip)).rejects.toThrow(/path|not allowed|unsupported/i);
     }
+  });
+
+  it("enforces the 750,000-byte text boundary during archive inspection", async () => {
+    await expect(inspectArchive(zipSync({
+      "index.html": new Uint8Array(750_000).fill(0x61)
+    }, { level: 0 }))).resolves.toMatchObject({ fileCount: 1, expandedBytes: 750_000 });
+
+    await expect(inspectArchive(zipSync({
+      "index.html": new Uint8Array(750_001).fill(0x61)
+    }, { level: 0 }))).rejects.toThrow(/750,000-byte text limit/i);
   });
 });

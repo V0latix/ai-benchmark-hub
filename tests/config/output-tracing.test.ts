@@ -6,5 +6,7 @@ describe("production output tracing", () => {
   it("includes Tailwind's stylesheet for the interactive preview route", () => {
     expect(nextConfig.outputFileTracingIncludes?.["/api/runs/\\[id\\]/visual/asset/\\[\\.\\.\\.path\\]"])
       .toContain("./node_modules/tailwindcss/index.css");
+    expect(nextConfig.outputFileTracingIncludes?.["/api/admin/imports/\\[draftId\\]/visual/asset/\\[\\.\\.\\.path\\]"])
+      .toContain("./node_modules/tailwindcss/index.css");
   });
 });

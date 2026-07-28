@@ -40,6 +40,27 @@ function receipt(overrides: Partial<FileReceiptPayload> = {}) {
 }
 
 describe("import draft service", () => {
+  it.each(["harness-smoke", "openclaw-benchmark"])(
+    "accepts the existing snapshot task %s even without a catalogued prompt",
+    async (task) => {
+      await expect(finalizeDraft(
+        { metadata: { ...metadata, task }, receipts: [receipt()], draftId: DRAFT_ID },
+        new InMemoryGitWriter(),
+        SECRET,
+        { now: NOW }
+      )).resolves.toMatchObject({ task });
+    }
+  );
+
+  it("rejects a task absent from the bundled Melvynx snapshot", async () => {
+    await expect(finalizeDraft(
+      { metadata: { ...metadata, task: "unknown-task" }, receipts: [receipt()], draftId: DRAFT_ID },
+      new InMemoryGitWriter(),
+      SECRET,
+      { now: NOW }
+    )).rejects.toThrow(/canonical|task/i);
+  });
+
   it("assembles only verified blobs plus normalized metadata into a new unpredictable draft branch", async () => {
     const writer = new InMemoryGitWriter();
 

@@ -1,8 +1,6 @@
 import { isAllowedPath, isTextPath } from "./paths";
 import type { BenchmarkSource } from "../sources/types";
-
-export const MAX_TEXT_FILE_BYTES = 750_000;
-export const MAX_BINARY_FILE_BYTES = 3_000_000;
+import { IMPORT_LIMITS } from "../imports/types";
 
 type TreeResponse = { tree?: Array<{ path: string; type: string }> };
 
@@ -22,9 +20,11 @@ export class SafeGitHubReader {
     const response = await this.fetcher(url, { headers: this.headers() });
     if (!response.ok) throw new Error(`GitHub file request failed (${response.status})`);
     const length = Number(response.headers.get("content-length") ?? "0");
-    if (length > MAX_TEXT_FILE_BYTES) throw new Error(`Remote file exceeds ${MAX_TEXT_FILE_BYTES} bytes`);
+    if (length > IMPORT_LIMITS.textFileBytes) throw new Error(`Remote file exceeds ${IMPORT_LIMITS.textFileBytes} bytes`);
     const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_TEXT_FILE_BYTES) throw new Error(`Remote file exceeds ${MAX_TEXT_FILE_BYTES} bytes`);
+    if (new TextEncoder().encode(text).byteLength > IMPORT_LIMITS.textFileBytes) {
+      throw new Error(`Remote file exceeds ${IMPORT_LIMITS.textFileBytes} bytes`);
+    }
     return text;
   }
 
@@ -34,9 +34,9 @@ export class SafeGitHubReader {
     const response = await this.fetcher(url, { headers: this.headers() });
     if (!response.ok) throw new Error(`GitHub file request failed (${response.status})`);
     const length = Number(response.headers.get("content-length") ?? "0");
-    if (length > MAX_BINARY_FILE_BYTES) throw new Error(`Remote file exceeds ${MAX_BINARY_FILE_BYTES} bytes`);
+    if (length > IMPORT_LIMITS.fileBytes) throw new Error(`Remote file exceeds ${IMPORT_LIMITS.fileBytes} bytes`);
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > MAX_BINARY_FILE_BYTES) throw new Error(`Remote file exceeds ${MAX_BINARY_FILE_BYTES} bytes`);
+    if (bytes.byteLength > IMPORT_LIMITS.fileBytes) throw new Error(`Remote file exceeds ${IMPORT_LIMITS.fileBytes} bytes`);
     return bytes;
   }
 

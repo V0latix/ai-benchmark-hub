@@ -69,9 +69,9 @@ and explicitly publish it.
 
 Imports accept supported static projects and Vite React projects with their
 required entry files. Each ZIP is limited to 20 MB compressed, 75 MB expanded,
-1,000 files, and 3 MB per file. Traversal paths, symlinks, nested archives,
-secret-like files, source maps, executables, and unsupported binaries are
-rejected before upload.
+1,000 total entries, 750 kB per text file, and 3 MB per binary file. Traversal
+paths, symlinks, nested archives, secret-like files, source maps, executables,
+and unsupported binaries are rejected before upload.
 
 Draft branches are unlisted but technically public in the public
 `Melvynx/benchmarks` repository until they are canceled or published. Do not

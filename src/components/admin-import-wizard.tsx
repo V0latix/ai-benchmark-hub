@@ -110,7 +110,7 @@ function safeError(payload: ErrorPayload, fallback: string) {
   return typeof payload.error === "string" && payload.error.trim() ? payload.error : fallback;
 }
 
-export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string[] }) {
+export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readonly string[] }) {
   const generationId = useId();
   const modelId = useId();
   const notesId = useId();

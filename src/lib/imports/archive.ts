@@ -70,6 +70,7 @@ function readZipEntries(data: Uint8Array): ZipEntry[] {
 
   if (disk !== 0 || centralDisk !== 0 || entriesOnDisk !== entryCount) throw new Error("Multi-disk ZIP archives are not allowed");
   if (entryCount === zip64Sentinel || centralOffset === zip64OffsetSentinel) throw new Error("ZIP64 archives are not allowed");
+  if (entryCount > IMPORT_LIMITS.archiveEntryCount) throw new Error("Archive exceeds the 1,000 entries limit");
   const entries: ZipEntry[] = [];
   let offset = centralOffset;
   let expandedBytes = 0;

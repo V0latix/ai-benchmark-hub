@@ -141,15 +141,19 @@ export function validateImportFile(input: ImportFileInput): ValidatedImportFile 
   if (prohibitedName.test(path) || prohibitedServerPath.test(path)) {
     throw new Error(`Import file name is not allowed: ${path}`);
   }
+
+  const fileExtension = extension(path);
+  const rule = fileRules[fileExtension];
+  if (!rule) throw new Error(`Unsupported import file type: ${path}`);
+  if (rule.text && input.bytes.byteLength > IMPORT_LIMITS.textFileBytes) {
+    throw new Error(`Import file exceeds the 750,000-byte text limit: ${path}`);
+  }
+
   if (isExecutable(input.bytes)) {
     throw new Error(`Executable file signature is not allowed: ${path}`);
   }
   if (hasArchiveMagic(input.bytes)) throw new Error(`Archive file signature is not allowed: ${path}`);
   if (hasPrivateKeyMagic(input.bytes)) throw new Error(`Private key or secret signature is not allowed: ${path}`);
-
-  const fileExtension = extension(path);
-  const rule = fileRules[fileExtension];
-  if (!rule) throw new Error(`Unsupported import file type: ${path}`);
 
   if (!rule.text && !binarySignatures[fileExtension]?.(input.bytes)) {
     throw new Error(`Binary file signature does not match its extension: ${path}`);

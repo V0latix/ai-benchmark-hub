@@ -4,14 +4,20 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAdminSession } from "../../src/lib/admin/auth";
+import melvynxSnapshot from "../../src/data/melvynx-runs.snapshot.json";
+import type { NormalizedRun } from "../../src/lib/sources/types";
 
 const SESSION_SECRET = "session-secret-with-at-least-32-bytes";
 const cookieStore = vi.hoisted(() => ({
   get: vi.fn()
 }));
+const getTaskCards = vi.hoisted(() => vi.fn());
 
 vi.mock("next/headers", () => ({
   cookies: vi.fn(async () => cookieStore)
+}));
+vi.mock("../../src/lib/storage/queries", () => ({
+  getTaskCards
 }));
 
 async function renderPage() {
@@ -25,11 +31,13 @@ describe("admin import page", () => {
     vi.stubEnv("ADMIN_SESSION_SECRET", SESSION_SECRET);
     vi.stubEnv("BENCHMARK_GITHUB_TOKEN", "github-token");
     cookieStore.get.mockReturnValue(undefined);
+    getTaskCards.mockResolvedValue([{ task: "overlay-only-task" }]);
   });
 
   afterEach(() => {
     cleanup();
     cookieStore.get.mockReset();
+    getTaskCards.mockReset();
     vi.unstubAllEnvs();
   });
 
@@ -57,7 +65,14 @@ describe("admin import page", () => {
     await renderPage();
 
     expect(screen.getByLabelText("Task")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "gmail-clone" })).toBeInTheDocument();
+    const expectedTasks = [...new Set(
+      (melvynxSnapshot as NormalizedRun[])
+        .map((run) => run.task)
+        .filter((task): task is string => Boolean(task))
+    )].sort();
+    expect(screen.getAllByRole("option").slice(1).map((option) => option.textContent)).toEqual(expectedTasks);
+    expect(expectedTasks).toHaveLength(22);
+    expect(getTaskCards).not.toHaveBeenCalled();
     expect(screen.queryByLabelText("Mot de passe administrateur")).not.toBeInTheDocument();
     expect(screen.queryByText("csrf")).not.toBeInTheDocument();
   });
