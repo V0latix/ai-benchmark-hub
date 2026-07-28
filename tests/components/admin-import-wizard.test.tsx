@@ -36,6 +36,7 @@ function successfulFetch(options: {
   publishFailures?: number;
   cleanupWarning?: string | null;
   invalidationWarning?: string | null;
+  previewStatus?: number;
 } = {}) {
   let receipt = 0;
   let publishAttempts = 0;
@@ -52,6 +53,13 @@ function successfulFetch(options: {
       return jsonResponse({
         draftToken: "draft-token",
         previewUrl: "/api/admin/imports/draft-1/visual?token=preview-token"
+      });
+    }
+    if (url === "/api/admin/imports/draft-1/visual?token=preview-token" && init?.method === "GET") {
+      const status = options.previewStatus ?? 200;
+      return new Response(status >= 200 && status < 300 ? "<html></html>" : "Preview not available", {
+        status,
+        headers: { "content-type": "text/html" }
       });
     }
     if (url === "/api/admin/imports/draft-1/publish") {
@@ -92,14 +100,24 @@ describe("AdminImportWizard", () => {
     render(<AdminImportWizard csrf={csrf} tasks={tasks} />);
 
     await identifyRun();
+    expect(screen.getByText("Archive valide").closest("[role='status']")).not.toBeNull();
     expect(screen.getByText(/branche temporaire.*techniquement publique/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
     const preview = await screen.findByTitle("Prévisualisation du run importé");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/admin/imports/draft-1/visual?token=preview-token",
+      expect.objectContaining({
+        cache: "no-store",
+        credentials: "same-origin",
+        method: "GET"
+      })
+    );
     expect(preview).toHaveAttribute("sandbox", "allow-scripts");
     expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
 
     fireEvent.load(preview);
+    expect(screen.getByText("Aperçu chargé")).toHaveAttribute("role", "status");
     expect(screen.getByRole("button", { name: "Publier le run" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Publier le run" }));
 
@@ -176,6 +194,12 @@ describe("AdminImportWizard", () => {
           previewUrl: "/api/admin/imports/draft-1/visual?token=preview-token"
         }));
       }
+      if (url === "/api/admin/imports/draft-1/visual?token=preview-token") {
+        return Promise.resolve(new Response("<html></html>", {
+          status: 200,
+          headers: { "content-type": "text/html" }
+        }));
+      }
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     });
     vi.stubGlobal("fetch", fetcher);
@@ -192,7 +216,11 @@ describe("AdminImportWizard", () => {
 
     await waitFor(() => expect(pending).toHaveLength(3));
     expect(maximumActive).toBe(3);
-    expect(screen.getByRole("status")).toHaveTextContent("0 sur 5");
+    expect(
+      screen
+        .getAllByRole("status")
+        .find((status) => status.textContent === "0 sur 5"),
+    ).toBeDefined();
     pending[0]();
     await waitFor(() => expect(pending).toHaveLength(4));
     expect(maximumActive).toBe(3);
@@ -225,6 +253,12 @@ describe("AdminImportWizard", () => {
         return jsonResponse({
           draftToken: "draft-token",
           previewUrl: "/api/admin/imports/draft-1/visual?token=preview-token"
+        });
+      }
+      if (url === "/api/admin/imports/draft-1/visual?token=preview-token") {
+        return new Response("<html></html>", {
+          status: 200,
+          headers: { "content-type": "text/html" }
         });
       }
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
@@ -275,6 +309,18 @@ describe("AdminImportWizard", () => {
     fireEvent.error(preview);
 
     expect(await screen.findByText(/prévisualisation n’a pas pu être chargée/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
+  });
+
+  it.each([404, 500])("keeps publish unavailable when preview preflight returns %s", async (status) => {
+    vi.stubGlobal("fetch", successfulFetch({ previewStatus: status }));
+    render(<AdminImportWizard csrf={csrf} tasks={tasks} />);
+
+    await identifyRun();
+    fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
+
+    expect(await screen.findByText(/prévisualisation sécurisée est indisponible/i)).toBeInTheDocument();
+    expect(screen.queryByTitle("Prévisualisation du run importé")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
   });
 
@@ -387,5 +433,79 @@ describe("AdminImportWizard", () => {
     expect(fetcher.mock.calls.filter(([url]) => url === "/api/admin/imports/files")).toHaveLength(0);
     expect(screen.queryByTitle("Prévisualisation du run importé")).not.toBeInTheDocument();
     expect(screen.queryByText("Archive valide")).not.toBeInTheDocument();
+  });
+
+  it("ignores a late publish success after logout and stays expired", async () => {
+    let resolvePublish: ((response: Response) => void) | undefined;
+    const base = successfulFetch();
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/admin/imports/draft-1/publish") {
+        return new Promise<Response>((resolve) => {
+          resolvePublish = resolve;
+        });
+      }
+      if (url === "/api/admin/session" && init?.method === "DELETE") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<AdminImportWizard csrf={csrf} tasks={tasks} />);
+
+    await identifyRun();
+    fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
+    const preview = await screen.findByTitle("Prévisualisation du run importé");
+    fireEvent.load(preview);
+    fireEvent.click(screen.getByRole("button", { name: "Publier le run" }));
+    await waitFor(() => expect(resolvePublish).toBeTypeOf("function"));
+    fireEvent.click(screen.getByRole("button", { name: "Se déconnecter" }));
+    await screen.findByText("Session fermée.");
+
+    resolvePublish?.(jsonResponse({
+      run: { id: "melvynx-run-1", task: "gmail-clone" },
+      runUrl: "/runs/melvynx-run-1",
+      taskUrl: "/tasks/gmail-clone",
+      cleanupWarning: null,
+      invalidationWarning: null
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.getByRole("link", { name: "Se reconnecter" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Voir le run public" })).not.toBeInTheDocument();
+  });
+
+  it("ignores a late cancellation success after logout and stays expired", async () => {
+    let resolveCancel: ((response: Response) => void) | undefined;
+    const base = successfulFetch();
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/admin/imports/draft-1" && init?.method === "DELETE") {
+        return new Promise<Response>((resolve) => {
+          resolveCancel = resolve;
+        });
+      }
+      if (url === "/api/admin/session" && init?.method === "DELETE") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<AdminImportWizard csrf={csrf} tasks={tasks} />);
+
+    await identifyRun();
+    fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
+    await screen.findByTitle("Prévisualisation du run importé");
+    fireEvent.click(screen.getByRole("button", { name: "Annuler le brouillon" }));
+    await waitFor(() => expect(resolveCancel).toBeTypeOf("function"));
+    fireEvent.click(screen.getByRole("button", { name: "Se déconnecter" }));
+    await screen.findByText("Session fermée.");
+
+    resolveCancel?.(jsonResponse({ cancelled: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.getByRole("link", { name: "Se reconnecter" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Archive LM Arena")).not.toBeInTheDocument();
+    expect(screen.queryByText("Brouillon annulé.")).not.toBeInTheDocument();
   });
 });

@@ -34,9 +34,12 @@ export function ImportPreview({
             Aperçu interactif isolé
           </div>
           <span
+            aria-atomic="true"
+            aria-live="polite"
             className={`inline-flex items-center gap-2 text-xs font-semibold ${
               error ? "text-[var(--danger)]" : loaded ? "text-[var(--success)]" : "text-[var(--warning)]"
             }`}
+            role="status"
           >
             {error ? <AlertTriangle aria-hidden="true" className="h-4 w-4" /> : <CheckCircle2 aria-hidden="true" className="h-4 w-4" />}
             {error ? "Échec du chargement" : loaded ? "Aperçu chargé" : "Chargement…"}

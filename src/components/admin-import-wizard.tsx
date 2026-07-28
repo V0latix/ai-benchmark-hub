@@ -132,6 +132,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string
   const [progress, setProgress] = useState({ complete: 0, total: 0 });
   const [uploadSession, setUploadSession] = useState<UploadSession | null>(null);
   const [draft, setDraft] = useState<FinalizedDraft | null>(null);
+  const [previewAvailable, setPreviewAvailable] = useState(false);
   const [previewLoaded, setPreviewLoaded] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [publishFailed, setPublishFailed] = useState(false);
@@ -147,6 +148,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string
     setUploadSession(null);
     setDraft(null);
     setProgress({ complete: 0, total: 0 });
+    setPreviewAvailable(false);
     setPreviewLoaded(false);
     setPreviewFailed(false);
     setPublishFailed(false);
@@ -402,13 +404,43 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string
       previewUrl: payload.previewUrl,
       metadata: session.metadata
     });
+    setPreviewAvailable(false);
     setPreviewLoaded(false);
     setPreviewFailed(false);
     setPhase("preview");
+
+    try {
+      const previewUrl = new URL(payload.previewUrl, window.location.origin);
+      const expectedPath = `/api/admin/imports/${encodeURIComponent(session.draftId)}/visual`;
+      if (
+        previewUrl.origin !== window.location.origin
+        || previewUrl.pathname !== expectedPath
+        || !previewUrl.searchParams.get("token")
+      ) {
+        throw new Error("Unsafe preview URL");
+      }
+      const previewResponse = await fetch(payload.previewUrl, {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { accept: "text/html" },
+        method: "GET"
+      });
+      if (operationSequence.current !== operation) return;
+      if (!previewResponse.ok) throw new Error("Preview unavailable");
+      setPreviewAvailable(true);
+    } catch {
+      if (operationSequence.current !== operation) return;
+      setPreviewAvailable(false);
+      setPreviewLoaded(false);
+      setPreviewFailed(true);
+      setError("La prévisualisation sécurisée est indisponible. Le brouillon reste disponible.");
+    }
   }
 
   async function publishDraft() {
-    if (!draft || !previewLoaded) return;
+    if (!draft || !previewAvailable || !previewLoaded) return;
+    const operation = operationSequence.current + 1;
+    operationSequence.current = operation;
     setError(null);
     setPublishFailed(false);
     setPhase("publishing");
@@ -421,8 +453,10 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string
         },
         body: JSON.stringify({ draftToken: draft.draftToken })
       });
+      if (operationSequence.current !== operation) return;
       if (response.status === 401) throw new SessionExpiredError();
       const payload = await readJson<PublishedResult & ErrorPayload>(response);
+      if (operationSequence.current !== operation) return;
       if (!response.ok || !payload.runUrl || !payload.taskUrl) {
         throw new Error(safeError(payload, "Publication impossible; le brouillon reste disponible."));
       }
@@ -436,6 +470,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string
       });
       setPhase("success");
     } catch (publishError) {
+      if (operationSequence.current !== operation) return;
       if (publishError instanceof SessionExpiredError) {
         expireSession();
         return;
@@ -452,6 +487,8 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string
 
   async function cancelDraft() {
     if (!draft) return;
+    const operation = operationSequence.current + 1;
+    operationSequence.current = operation;
     setError(null);
     try {
       const response = await fetch(`/api/admin/imports/${encodeURIComponent(draft.draftId)}`, {
@@ -462,12 +499,15 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string
         },
         body: JSON.stringify({ draftToken: draft.draftToken })
       });
+      if (operationSequence.current !== operation) return;
       if (response.status === 401) throw new SessionExpiredError();
       const payload = await readJson<ErrorPayload>(response);
+      if (operationSequence.current !== operation) return;
       if (!response.ok) throw new Error(safeError(payload, "Annulation impossible."));
       resetAll({ preserveNotice: true });
       setNotice("Brouillon annulé.");
     } catch (cancelError) {
+      if (operationSequence.current !== operation) return;
       if (cancelError instanceof SessionExpiredError) {
         expireSession();
         return;
@@ -685,7 +725,14 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string
                   <div className="flex items-center gap-3">
                     <CheckCircle2 aria-hidden="true" className="h-6 w-6 text-[var(--success)]" />
                     <div>
-                      <h2 className="font-semibold text-[var(--text-primary)]">Archive valide</h2>
+                      <h2
+                        aria-atomic="true"
+                        aria-live="polite"
+                        className="font-semibold text-[var(--text-primary)]"
+                        role="status"
+                      >
+                        Archive valide
+                      </h2>
                       <p className="text-sm text-[var(--text-muted)]">Aucun fichier n’a été exécuté dans votre navigateur.</p>
                     </div>
                   </div>
@@ -750,22 +797,40 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string
 
           {(phase === "preview" || phase === "publishing") && draft && (
             <>
-              <ImportPreview
-                error={previewFailed}
-                loaded={previewLoaded}
-                metadata={draft.metadata}
-                onError={() => {
-                  setPreviewLoaded(false);
-                  setPreviewFailed(true);
-                  setError("La prévisualisation n’a pas pu être chargée. Le brouillon reste disponible.");
-                }}
-                onLoad={() => {
-                  setPreviewFailed(false);
-                  setPreviewLoaded(true);
-                  setError(null);
-                }}
-                previewUrl={draft.previewUrl}
-              />
+              {previewAvailable ? (
+                <ImportPreview
+                  error={previewFailed}
+                  loaded={previewLoaded}
+                  metadata={draft.metadata}
+                  onError={() => {
+                    setPreviewLoaded(false);
+                    setPreviewFailed(true);
+                    setError("La prévisualisation n’a pas pu être chargée. Le brouillon reste disponible.");
+                  }}
+                  onLoad={() => {
+                    setPreviewFailed(false);
+                    setPreviewLoaded(true);
+                    setError(null);
+                  }}
+                  previewUrl={draft.previewUrl}
+                />
+              ) : (
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--canvas)] p-6">
+                  <p
+                    aria-atomic="true"
+                    aria-live="polite"
+                    className="flex items-center gap-2 text-sm text-[var(--text-muted)]"
+                    role="status"
+                  >
+                    {previewFailed ? (
+                      <AlertTriangle aria-hidden="true" className="h-4 w-4 text-[var(--danger)]" />
+                    ) : (
+                      <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />
+                    )}
+                    {previewFailed ? "Prévisualisation non chargée" : "Vérification de la prévisualisation sécurisée…"}
+                  </p>
+                </div>
+              )}
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-[var(--danger)]/60 px-5 py-3 font-semibold text-[var(--danger)] disabled:opacity-60"
@@ -778,7 +843,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: string
                 </button>
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-5 py-3 font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={!previewLoaded || previewFailed || phase === "publishing"}
+                  disabled={!previewAvailable || !previewLoaded || previewFailed || phase === "publishing"}
                   onClick={publishDraft}
                   type="button"
                 >
