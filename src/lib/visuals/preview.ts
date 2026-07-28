@@ -98,6 +98,39 @@ function rewritePreviewHtmlUrls(html: string, assetBaseUrl: string, query?: stri
   });
 }
 
+function readHtmlAttribute(tag: string, attribute: string): string | null {
+  const match = tag.match(new RegExp(`\\s${attribute}\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))`, "i"));
+  return match ? (match[1] ?? match[2] ?? match[3] ?? "") : null;
+}
+
+function withCredentialedCrossOrigin(tag: string, beforeAttribute?: "src" | "href"): string {
+  const withoutCrossOrigin = tag.replace(
+    /\s+crossorigin(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi,
+    ""
+  );
+  const before = beforeAttribute
+    ? new RegExp(`\\s${beforeAttribute}\\s*=`, "i").exec(withoutCrossOrigin)?.index
+    : undefined;
+  const insertion = before ?? withoutCrossOrigin.lastIndexOf(withoutCrossOrigin.endsWith("/>") ? "/>" : ">");
+  return `${withoutCrossOrigin.slice(0, insertion)} crossorigin="use-credentials"${withoutCrossOrigin.slice(insertion)}`;
+}
+
+function credentialStandalonePreviewResources(html: string, assetBaseUrl: string): string {
+  const assetBase = assetBaseUrl.replace(/\/$/, "");
+  const scripts = html.replace(/<script\b[^>]*>/gi, (tag) => (
+    readHtmlAttribute(tag, "type")?.toLowerCase() === "module"
+      ? withCredentialedCrossOrigin(tag, readHtmlAttribute(tag, "src") === null ? undefined : "src")
+      : tag
+  ));
+  return scripts.replace(/<link\b[^>]*>/gi, (tag) => {
+    const rel = readHtmlAttribute(tag, "rel")?.toLowerCase().split(/\s+/) ?? [];
+    const href = readHtmlAttribute(tag, "href");
+    const needsCredentials = rel.includes("modulepreload")
+      || (rel.includes("stylesheet") && href !== null && href.startsWith(`${assetBase}/`));
+    return needsCredentials ? withCredentialedCrossOrigin(tag, "href") : tag;
+  });
+}
+
 function previewStorageShim(): string {
   return `<script>window.addEventListener("error", (event) => { document.documentElement.dataset.previewError = event.message; }); window.addEventListener("unhandledrejection", (event) => { document.documentElement.dataset.previewError = String(event.reason); }); document.documentElement.dataset.previewBootstrap = "ready"; const previewStorage = new Map(); const previewStorageApi = { getItem: (key) => previewStorage.get(String(key)) ?? null, setItem: (key, value) => previewStorage.set(String(key), String(value)), removeItem: (key) => previewStorage.delete(String(key)), clear: () => previewStorage.clear(), key: (index) => Array.from(previewStorage.keys())[index] ?? null, get length() { return previewStorage.size; } }; try { Object.defineProperty(globalThis, "localStorage", { value: previewStorageApi }); } catch {}</script>`;
 }
@@ -203,6 +236,9 @@ export function injectStandalonePreview(
 ): string {
   const rewritten = rewritePreviewHtmlUrls(html, assetBaseUrl, query);
   return readiness
-    ? injectPreviewHeadBootstrap(rewritten, adminReadinessBootstrap(readiness, false))
+    ? injectPreviewHeadBootstrap(
+        credentialStandalonePreviewResources(rewritten, assetBaseUrl),
+        adminReadinessBootstrap(readiness, false)
+      )
     : injectPreviewBootstrap(rewritten, previewStorageShim());
 }

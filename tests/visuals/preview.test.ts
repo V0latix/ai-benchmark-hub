@@ -62,11 +62,88 @@ describe("safe HTML previews", () => {
   });
 
   it("keeps standalone HTML modules and does not add a Vite entrypoint", () => {
-    const html = injectStandalonePreview('<html><head></head><body><script type="module">import "three";</script></body></html>', "/api/runs/run-42/visual/asset");
+    const html = injectStandalonePreview(
+      `<html><head>
+        <link rel="modulepreload" href="./assets/chunk.js">
+        <link rel="stylesheet" href="./assets/app.css">
+      </head><body>
+        <script type="module" src="./assets/app.js"></script>
+        <script type="module">import "three";</script>
+      </body></html>`,
+      "/api/runs/run-42/visual/asset"
+    );
     expect(html).toContain('import "three";');
     expect(html).toContain("previewStorage");
     expect(html).not.toContain("src/main.tsx");
     expect(html).not.toContain("previewEntry");
+    expect(html).not.toContain('crossorigin="use-credentials"');
+  });
+
+  it("credentials every admin standalone module and local preload or stylesheet before its URL", () => {
+    const html = injectStandalonePreview(
+      `<html><head>
+        <link href="./assets/app.js" rel="modulepreload" crossorigin="anonymous">
+        <link rel="stylesheet" href="./assets/app.css">
+      </head><body>
+        <script defer src="./assets/app.js" type="module" crossorigin="anonymous"></script>
+        <script type="module" crossorigin="use-credentials">import "./assets/inline.js";</script>
+      </body></html>`,
+      "/api/admin/imports/draft-1/visual/asset",
+      "v=tailwind-2",
+      { nonce: "cd".repeat(16) }
+    );
+    const dom = new JSDOM(html);
+    const moduleScripts = [...dom.window.document.querySelectorAll<HTMLScriptElement>('script[type="module"]')];
+    const credentialedLinks = [...dom.window.document.querySelectorAll<HTMLLinkElement>('link[rel~="modulepreload"], link[rel~="stylesheet"]')];
+
+    expect(moduleScripts).toHaveLength(2);
+    expect(credentialedLinks).toHaveLength(2);
+    for (const element of [...moduleScripts, ...credentialedLinks]) {
+      expect(element.getAttribute("crossorigin")).toBe("use-credentials");
+      expect(element.outerHTML.match(/\bcrossorigin\b/gi)).toHaveLength(1);
+    }
+    for (const element of moduleScripts.filter((script) => script.hasAttribute("src"))) {
+      expect(element.outerHTML.indexOf("crossorigin=")).toBeLessThan(element.outerHTML.indexOf("src="));
+    }
+    for (const element of credentialedLinks) {
+      expect(element.outerHTML.indexOf("crossorigin=")).toBeLessThan(element.outerHTML.indexOf("href="));
+    }
+    expect(moduleScripts[1]?.textContent).toContain('import "./assets/inline.js";');
+  });
+
+  it("does not duplicate credentials already present on admin standalone module resources", () => {
+    const html = injectStandalonePreview(
+      `<html><head>
+        <link crossorigin="use-credentials" rel="modulepreload" href="./assets/app.js">
+        <link crossorigin="use-credentials" rel="stylesheet" href="./assets/app.css">
+      </head><body>
+        <script crossorigin="use-credentials" type="module" src="./assets/app.js"></script>
+        <script crossorigin="use-credentials" type="module">import "./assets/inline.js";</script>
+      </body></html>`,
+      "/api/admin/imports/draft-1/visual/asset",
+      "v=tailwind-2",
+      { nonce: "cd".repeat(16) }
+    );
+    const dom = new JSDOM(html);
+    const credentialed = dom.window.document.querySelectorAll(
+      'script[type="module"], link[rel~="modulepreload"], link[rel~="stylesheet"]'
+    );
+    const rawResourceTags = [...html.matchAll(/<(?:script|link)\b[^>]*>/gi)]
+      .map((match) => match[0])
+      .filter((tag) => (
+        tag.includes('type="module"')
+        || tag.includes('rel="modulepreload"')
+        || tag.includes('rel="stylesheet"')
+      ));
+
+    expect(credentialed).toHaveLength(4);
+    expect(rawResourceTags).toHaveLength(4);
+    for (const element of credentialed) {
+      expect(element.getAttribute("crossorigin")).toBe("use-credentials");
+    }
+    for (const tag of rawResourceTags) {
+      expect(tag.match(/\bcrossorigin\b/gi)).toHaveLength(1);
+    }
   });
 
   it("proxies root and ordinary relative HTML assets while preserving query/hash and inert URLs", () => {
