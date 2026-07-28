@@ -111,6 +111,118 @@ describe("safe HTML previews", () => {
     expect(moduleScripts[1]?.textContent).toContain('import "./assets/inline.js";');
   });
 
+  it("parses quoted tag closers and mixed attribute syntax while keeping standalone readiness", async () => {
+    const messages: unknown[] = [];
+    const html = injectStandalonePreview(
+      `<html><head>
+        <link data-label='preload 1 > 0' REL=modulepreload HREF='./assets/chunk.js' crossorigin='anonymous'>
+        <link REL='stylesheet' data-label="href=keep.css crossorigin=keep 2 > 1" HREF='./assets/app.css'>
+      </head><body>
+        Math: 1 < 2
+        <script
+          data-label="1 > 0 type=classic src=ignored.js crossorigin=ignored"
+          TYPE='module'
+          crossorigin='anonymous'
+          SRC='./assets/app.js'
+          data-source='src=keep.js crossorigin=keep'
+        ></script>
+        <script data-label='type=classic src=fake.js crossorigin=fake 3 > 2' TYPE=module>
+          import "/api/admin/imports/draft-1/visual/asset/assets/inline.js?v=tailwind-2";
+        </script>
+      </body></html>`,
+      "/api/admin/imports/draft-1/visual/asset",
+      "v=tailwind-2",
+      { nonce: "cd".repeat(16) }
+    );
+    const dom = new JSDOM(html, {
+      runScripts: "dangerously",
+      url: "https://hub.example/api/admin/imports/draft-1/visual",
+      beforeParse(window) {
+        window.postMessage = vi.fn((message: unknown) => {
+          messages.push(message);
+        }) as typeof window.postMessage;
+      }
+    });
+    const external = dom.window.document.querySelector<HTMLScriptElement>('script[src*="assets/app.js"]');
+    const inline = [...dom.window.document.querySelectorAll<HTMLScriptElement>('script[type="module"]')]
+      .find((script) => !script.hasAttribute("src"));
+    const preload = dom.window.document.querySelector<HTMLLinkElement>('link[rel~="modulepreload"]');
+    const stylesheet = dom.window.document.querySelector<HTMLLinkElement>('link[rel~="stylesheet"]');
+
+    expect(external?.getAttribute("src")).toBe("/api/admin/imports/draft-1/visual/asset/assets/app.js?v=tailwind-2");
+    expect(external?.getAttribute("crossorigin")).toBe("use-credentials");
+    expect(external?.getAttribute("data-label")).toBe("1 > 0 type=classic src=ignored.js crossorigin=ignored");
+    expect(external?.getAttribute("data-source")).toBe("src=keep.js crossorigin=keep");
+    expect(inline?.getAttribute("crossorigin")).toBe("use-credentials");
+    expect(inline?.textContent).toContain('import "/api/admin/imports/draft-1/visual/asset/assets/inline.js?v=tailwind-2";');
+    expect(preload?.getAttribute("href")).toBe("/api/admin/imports/draft-1/visual/asset/assets/chunk.js?v=tailwind-2");
+    expect(preload?.getAttribute("crossorigin")).toBe("use-credentials");
+    expect(preload?.getAttribute("data-label")).toBe("preload 1 > 0");
+    expect(stylesheet?.getAttribute("href")).toBe("/api/admin/imports/draft-1/visual/asset/assets/app.css?v=tailwind-2");
+    expect(stylesheet?.getAttribute("crossorigin")).toBe("use-credentials");
+    expect(stylesheet?.getAttribute("data-label")).toBe("href=keep.css crossorigin=keep 2 > 1");
+
+    dom.window.dispatchEvent(new dom.window.Event("load"));
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      source: dom.window,
+      data: {
+        type: adminPreviewInitMessageType,
+        nonce: "cd".repeat(16),
+        generation: 4
+      }
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(messages).toContainEqual({
+      type: adminPreviewMessageType,
+      state: "ready",
+      nonce: "cd".repeat(16),
+      generation: 4
+    });
+    dom.window.close();
+  });
+
+  it("ignores module attribute names embedded in unrelated tag values", () => {
+    const html = injectStandalonePreview(
+      `<html><head>
+        <link data-label='keep rel=modulepreload href="./fake.js" crossorigin="anonymous"' rel="icon" href="./icon.svg">
+      </head><body>
+        <script data-label='keep type=module src="./fake.js" crossorigin="anonymous"' src="./classic.js"></script>
+      </body></html>`,
+      "/api/admin/imports/draft-1/visual/asset",
+      "v=tailwind-2",
+      { nonce: "cd".repeat(16) }
+    );
+    const dom = new JSDOM(html);
+    const icon = dom.window.document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    const classic = dom.window.document.querySelector<HTMLScriptElement>("script[src]");
+
+    expect(icon?.getAttribute("data-label")).toBe('keep rel=modulepreload href="./fake.js" crossorigin="anonymous"');
+    expect(icon?.hasAttribute("crossorigin")).toBe(false);
+    expect(classic?.getAttribute("data-label")).toBe('keep type=module src="./fake.js" crossorigin="anonymous"');
+    expect(classic?.hasAttribute("crossorigin")).toBe(false);
+  });
+
+  it("preserves comments, doctype, and raw script content while credentialing the real module", () => {
+    const comment = '<!-- <script type="module" src="./comment.js" crossorigin="anonymous"></script> -->';
+    const rawLink = '<link rel="modulepreload" href="./raw.js" crossorigin="anonymous">';
+    const html = injectStandalonePreview(
+      `<!doctype html><html><head>${comment}</head><body>
+        <script type="module">const rawLink = ${JSON.stringify(rawLink)};</script>
+      </body></html>`,
+      "/api/admin/imports/draft-1/visual/asset",
+      "v=tailwind-2",
+      { nonce: "cd".repeat(16) }
+    );
+    const dom = new JSDOM(html);
+    const moduleScript = dom.window.document.querySelector<HTMLScriptElement>('script[type="module"]');
+
+    expect(dom.window.document.doctype?.name).toBe("html");
+    expect(html).toContain(comment);
+    expect(moduleScript?.getAttribute("crossorigin")).toBe("use-credentials");
+    expect(moduleScript?.textContent).toContain(`const rawLink = ${JSON.stringify(rawLink)};`);
+    dom.window.close();
+  });
+
   it("does not duplicate credentials already present on admin standalone module resources", () => {
     const html = injectStandalonePreview(
       `<html><head>

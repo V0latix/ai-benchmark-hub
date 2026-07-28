@@ -64,70 +64,222 @@ function injectPreviewHeadBootstrap(html: string, bootstrap: string): string {
     : `${bootstrap}${html}`;
 }
 
-function rewritePreviewHtmlUrls(html: string, assetBaseUrl: string, query?: string): string {
-  const base = assetBaseUrl.replace(/\/$/, "");
-  return html.replace(/\b(src|href)\s*=\s*(["'])([^"']*)\2/gi, (match, attribute, _quote, reference: string) => {
-    if (
-      !reference
-      || reference.startsWith("#")
-      || reference.startsWith("?")
-      || reference.startsWith("//")
-      || /^[a-z][a-z0-9+.-]*:/i.test(reference)
-    ) {
-      return match;
-    }
+type HtmlAttribute = {
+  name: string;
+  quoted: boolean;
+  range: [number, number];
+  value: string | null;
+  valueRange?: [number, number];
+};
 
-    const hashIndex = reference.indexOf("#");
-    const hash = hashIndex >= 0 ? reference.slice(hashIndex) : "";
-    const withoutHash = hashIndex >= 0 ? reference.slice(0, hashIndex) : reference;
-    const queryIndex = withoutHash.indexOf("?");
-    const suffix = `${queryIndex >= 0 ? withoutHash.slice(queryIndex) : ""}${hash}`;
-    let path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
-    if (path.includes("\\")) throw new Error("Preview relative URL escapes artifact root");
-    path = path.replace(/^\/+/, "").replace(/^(?:\.\/)+/, "");
-    if (!path) return match;
-    const unsafe = path.split("/").some((segment) => {
-      try {
-        return decodeURIComponent(segment) === "..";
-      } catch {
-        return true;
-      }
+type HtmlTag = {
+  attributes: HtmlAttribute[];
+  close: number;
+  name: string;
+};
+
+const isHtmlSpace = (value: string) => value === " " || value === "\t" || value === "\n" || value === "\r" || value === "\f";
+
+function findHtmlTagEnd(html: string, start: number): number {
+  let quote = "";
+  for (let index = start; index < html.length; index += 1) {
+    const value = html[index] ?? "";
+    if (quote) {
+      if (value === quote) quote = "";
+    } else if (value === "\"" || value === "'") quote = value;
+    else if (value === ">") return index + 1;
+  }
+  return -1;
+}
+
+function parseHtmlTag(tag: string): HtmlTag | null {
+  if (tag[0] !== "<" || tag[1] === "/" || tag.at(-1) !== ">") return null;
+  let cursor = 1;
+  while (cursor < tag.length && !isHtmlSpace(tag[cursor] ?? "") && !"/>".includes(tag[cursor] ?? "")) cursor += 1;
+  if (cursor === 1) return null;
+  const parsed: HtmlTag = { attributes: [], close: tag.length - 1, name: tag.slice(1, cursor).toLowerCase() };
+
+  while (cursor < tag.length - 1) {
+    const rangeStart = cursor;
+    while (isHtmlSpace(tag[cursor] ?? "")) cursor += 1;
+    if ("/>".includes(tag[cursor] ?? "")) {
+      parsed.close = rangeStart;
+      break;
+    }
+    const nameStart = cursor;
+    while (cursor < tag.length - 1 && !isHtmlSpace(tag[cursor] ?? "") && !"=/>".includes(tag[cursor] ?? "")) cursor += 1;
+    if (cursor === nameStart) {
+      cursor += 1;
+      continue;
+    }
+    const attribute: HtmlAttribute = {
+      name: tag.slice(nameStart, cursor).toLowerCase(),
+      quoted: false,
+      range: [rangeStart, cursor],
+      value: null
+    };
+    while (isHtmlSpace(tag[cursor] ?? "")) cursor += 1;
+    if (tag[cursor] === "=") {
+      cursor += 1;
+      while (isHtmlSpace(tag[cursor] ?? "")) cursor += 1;
+      const quote = tag[cursor] === "\"" || tag[cursor] === "'" ? tag[cursor] : "";
+      if (quote) cursor += 1;
+      const valueStart = cursor;
+      while (
+        cursor < tag.length - 1
+        && (quote ? tag[cursor] !== quote : !isHtmlSpace(tag[cursor] ?? "") && tag[cursor] !== ">")
+      ) cursor += 1;
+      attribute.quoted = Boolean(quote);
+      attribute.value = tag.slice(valueStart, cursor);
+      attribute.valueRange = [valueStart, cursor];
+      if (quote && tag[cursor] === quote) cursor += 1;
+    }
+    attribute.range[1] = cursor;
+    parsed.attributes.push(attribute);
+  }
+  return parsed;
+}
+
+function findRawTextEnd(html: string, name: string, start: number): number {
+  const lower = html.toLowerCase();
+  const needle = `</${name}`;
+  let candidate = lower.indexOf(needle, start);
+  while (candidate >= 0) {
+    const boundary = html[candidate + needle.length] ?? "";
+    if (boundary === ">" || boundary === "/" || isHtmlSpace(boundary)) {
+      const end = html.indexOf(">", candidate + needle.length);
+      return end < 0 ? html.length : end + 1;
+    }
+    candidate = lower.indexOf(needle, candidate + needle.length);
+  }
+  return html.length;
+}
+
+function transformHtmlTags(html: string, transform: (source: string, tag: HtmlTag) => string): string {
+  let copied = 0;
+  let cursor = 0;
+  let output = "";
+  while (cursor < html.length) {
+    const opening = html.indexOf("<", cursor);
+    if (opening < 0) break;
+    if (html.startsWith("<!--", opening)) {
+      const end = html.indexOf("-->", opening + 4);
+      cursor = end < 0 ? html.length : end + 3;
+      continue;
+    }
+    const first = html[opening + 1] ?? "";
+    if (!/[A-Za-z]/.test(first)) {
+      if ("!/?".includes(first)) {
+        const end = findHtmlTagEnd(html, opening + 1);
+        cursor = end < 0 ? html.length : end;
+      } else cursor = opening + 1;
+      continue;
+    }
+    const end = findHtmlTagEnd(html, opening + 1);
+    if (end < 0) break;
+    const source = html.slice(opening, end);
+    const tag = parseHtmlTag(source);
+    if (!tag) {
+      cursor = end;
+      continue;
+    }
+    const replacement = transform(source, tag);
+    if (replacement !== source) {
+      output += html.slice(copied, opening) + replacement;
+      copied = end;
+    }
+    cursor = ["script", "style", "textarea", "title"].includes(tag.name)
+      ? findRawTextEnd(html, tag.name, end)
+      : end;
+  }
+  return output + html.slice(copied);
+}
+
+function rewritePreviewReference(reference: string, assetBaseUrl: string, query?: string): string | null {
+  if (
+    !reference
+    || reference.startsWith("#")
+    || reference.startsWith("?")
+    || reference.startsWith("//")
+    || /^[a-z][a-z0-9+.-]*:/i.test(reference)
+  ) {
+    return null;
+  }
+
+  const hashIndex = reference.indexOf("#");
+  const hash = hashIndex >= 0 ? reference.slice(hashIndex) : "";
+  const withoutHash = hashIndex >= 0 ? reference.slice(0, hashIndex) : reference;
+  const queryIndex = withoutHash.indexOf("?");
+  const suffix = `${queryIndex >= 0 ? withoutHash.slice(queryIndex) : ""}${hash}`;
+  let path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+  if (path.includes("\\")) throw new Error("Preview relative URL escapes artifact root");
+  path = path.replace(/^\/+/, "").replace(/^(?:\.\/)+/, "");
+  if (!path) return null;
+  const unsafe = path.split("/").some((segment) => {
+    try {
+      return decodeURIComponent(segment) === "..";
+    } catch {
+      return true;
+    }
+  });
+  if (unsafe) throw new Error("Preview relative URL escapes artifact root");
+  return withPreviewQuery(`${assetBaseUrl.replace(/\/$/, "")}/${path}${suffix}`, query);
+}
+
+function rewritePreviewHtmlUrls(html: string, assetBaseUrl: string, query?: string): string {
+  return transformHtmlTags(html, (source, tag) => {
+    const replacements = tag.attributes.flatMap((attribute) => {
+      if (
+        (attribute.name !== "src" && attribute.name !== "href")
+        || !attribute.quoted
+        || attribute.value === null
+        || attribute.valueRange === undefined
+      ) return [];
+      const rewritten = rewritePreviewReference(attribute.value, assetBaseUrl, query);
+      return rewritten === null ? [] : [{ range: attribute.valueRange, value: rewritten }];
     });
-    if (unsafe) throw new Error("Preview relative URL escapes artifact root");
-    return `${attribute}="${withPreviewQuery(`${base}/${path}${suffix}`, query)}"`;
+    return replacements.sort((left, right) => right.range[0] - left.range[0]).reduce(
+      (current, replacement) => `${current.slice(0, replacement.range[0])}${replacement.value}${current.slice(replacement.range[1])}`,
+      source
+    );
   });
 }
 
-function readHtmlAttribute(tag: string, attribute: string): string | null {
-  const match = tag.match(new RegExp(`\\s${attribute}\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))`, "i"));
-  return match ? (match[1] ?? match[2] ?? match[3] ?? "") : null;
-}
+const readHtmlAttribute = (tag: HtmlTag, name: string) => tag.attributes.find((attribute) => attribute.name === name);
 
-function withCredentialedCrossOrigin(tag: string, beforeAttribute?: "src" | "href"): string {
-  const withoutCrossOrigin = tag.replace(
-    /\s+crossorigin(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi,
-    ""
-  );
-  const before = beforeAttribute
-    ? new RegExp(`\\s${beforeAttribute}\\s*=`, "i").exec(withoutCrossOrigin)?.index
-    : undefined;
-  const insertion = before ?? withoutCrossOrigin.lastIndexOf(withoutCrossOrigin.endsWith("/>") ? "/>" : ">");
+function withCredentialedCrossOrigin(source: string, tag: HtmlTag, before?: "src" | "href"): string {
+  const withoutCrossOrigin = tag.attributes
+    .filter((attribute) => attribute.name === "crossorigin")
+    .sort((left, right) => right.range[0] - left.range[0])
+    .reduce(
+      (current, attribute) => `${current.slice(0, attribute.range[0])}${current.slice(attribute.range[1])}`,
+      source
+    );
+  const reparsed = parseHtmlTag(withoutCrossOrigin);
+  if (!reparsed) return source;
+  const insertion = (before ? readHtmlAttribute(reparsed, before)?.range[0] : undefined) ?? reparsed.close;
   return `${withoutCrossOrigin.slice(0, insertion)} crossorigin="use-credentials"${withoutCrossOrigin.slice(insertion)}`;
 }
 
 function credentialStandalonePreviewResources(html: string, assetBaseUrl: string): string {
   const assetBase = assetBaseUrl.replace(/\/$/, "");
-  const scripts = html.replace(/<script\b[^>]*>/gi, (tag) => (
-    readHtmlAttribute(tag, "type")?.toLowerCase() === "module"
-      ? withCredentialedCrossOrigin(tag, readHtmlAttribute(tag, "src") === null ? undefined : "src")
-      : tag
-  ));
-  return scripts.replace(/<link\b[^>]*>/gi, (tag) => {
-    const rel = readHtmlAttribute(tag, "rel")?.toLowerCase().split(/\s+/) ?? [];
-    const href = readHtmlAttribute(tag, "href");
+  return transformHtmlTags(html, (source, tag) => {
+    if (tag.name === "script") {
+      const type = readHtmlAttribute(tag, "type")?.value;
+      return type?.toLowerCase() === "module"
+        ? withCredentialedCrossOrigin(
+            source,
+            tag,
+            readHtmlAttribute(tag, "src") === undefined ? undefined : "src"
+          )
+        : source;
+    }
+    if (tag.name !== "link") return source;
+    const rel = readHtmlAttribute(tag, "rel")?.value?.toLowerCase().split(/\s+/) ?? [];
+    const href = readHtmlAttribute(tag, "href")?.value;
     const needsCredentials = rel.includes("modulepreload")
-      || (rel.includes("stylesheet") && href !== null && href.startsWith(`${assetBase}/`));
-    return needsCredentials ? withCredentialedCrossOrigin(tag, "href") : tag;
+      || (rel.includes("stylesheet") && href != null && href.startsWith(`${assetBase}/`));
+    return needsCredentials ? withCredentialedCrossOrigin(source, tag, "href") : source;
   });
 }
 
