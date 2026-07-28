@@ -81,11 +81,11 @@ describe("import draft service", () => {
     });
     expect(result.previewNonce).toBe("cd".repeat(16));
     const previewUrl = new URL(result.previewUrl, "https://hub.example");
-    const previewToken = previewUrl.searchParams.get("preview");
     expect(previewUrl.pathname).toBe(`/api/admin/imports/${DRAFT_ID}/visual`);
-    expect([...previewUrl.searchParams.keys()]).toEqual(["preview"]);
-    expect(previewToken).not.toBe(result.draftToken);
-    expect(verifyPreviewToken(previewToken!, SECRET, {
+    expect([...previewUrl.searchParams.keys()]).toEqual([]);
+    expect(result.previewSetupToken).not.toBe(result.draftToken);
+    expect(result.previewUrl).not.toContain(result.previewSetupToken);
+    expect(verifyPreviewToken(result.previewSetupToken, SECRET, {
       draftId: DRAFT_ID,
       branch: result.branch,
       commitSha: result.commitSha,

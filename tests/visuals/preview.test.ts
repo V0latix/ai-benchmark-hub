@@ -2,6 +2,7 @@ import { JSDOM } from "jsdom";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  adminPreviewInitMessageType,
   adminPreviewMessageType,
   getPreviewAssetUrl,
   getPreviewProxyUrl,
@@ -66,12 +67,12 @@ describe("safe HTML previews", () => {
         <img src="//example.com/image.png">
       </body></html>`,
       "/api/admin/imports/draft-1/visual/asset",
-      "v=tailwind-2&preview=short"
+      "v=tailwind-2"
     );
 
-    expect(html).toContain('href="/api/admin/imports/draft-1/visual/asset/style.css?theme=dark&v=tailwind-2&preview=short#sheet"');
-    expect(html).toContain('src="/api/admin/imports/draft-1/visual/asset/assets/app.js?v=tailwind-2&preview=short"');
-    expect(html).toContain('src="/api/admin/imports/draft-1/visual/asset/hero.png?size=2&v=tailwind-2&preview=short#photo"');
+    expect(html).toContain('href="/api/admin/imports/draft-1/visual/asset/style.css?theme=dark&v=tailwind-2#sheet"');
+    expect(html).toContain('src="/api/admin/imports/draft-1/visual/asset/assets/app.js?v=tailwind-2"');
+    expect(html).toContain('src="/api/admin/imports/draft-1/visual/asset/hero.png?size=2&v=tailwind-2#photo"');
     for (const untouched of [
       'href="#details"',
       'src="data:image/png;base64,AA"',
@@ -88,7 +89,7 @@ describe("safe HTML previews", () => {
     expect(() => injectStandalonePreview(
       '<html><body><script src="../outside.js"></script></body></html>',
       "/api/admin/imports/draft-1/visual/asset",
-      "preview=short"
+      "v=tailwind-2"
     )).toThrow(/outside|relative|root/i);
   });
 
@@ -97,7 +98,7 @@ describe("safe HTML previews", () => {
     const html = injectStandalonePreview(
       "<html><head></head><body><main>Ready</main></body></html>",
       "/api/admin/imports/draft-1/visual/asset",
-      "preview=short",
+      "v=tailwind-2",
       { nonce: "cd".repeat(16) }
     );
     const dom = new JSDOM(html, {
@@ -111,18 +112,28 @@ describe("safe HTML previews", () => {
     });
 
     dom.window.dispatchEvent(new dom.window.Event("load"));
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      source: dom.window,
+      data: {
+        type: adminPreviewInitMessageType,
+        nonce: "cd".repeat(16),
+        generation: 3
+      }
+    }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(messages).toContainEqual({
       type: adminPreviewMessageType,
       state: "ready",
-      nonce: "cd".repeat(16)
+      nonce: "cd".repeat(16),
+      generation: 3
     });
 
     dom.window.dispatchEvent(new dom.window.ErrorEvent("error", { message: "runtime failed" }));
     expect(messages).toContainEqual({
       type: adminPreviewMessageType,
       state: "error",
-      nonce: "cd".repeat(16)
+      nonce: "cd".repeat(16),
+      generation: 3
     });
     dom.window.close();
   });

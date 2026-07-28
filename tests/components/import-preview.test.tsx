@@ -38,7 +38,7 @@ describe("ImportPreview", () => {
         onError={onError}
         onFrameLoad={onFrameLoad}
         onReady={onReady}
-        previewUrl="/api/admin/imports/draft-1/visual?preview=short-token"
+        previewUrl="/api/admin/imports/draft-1/visual"
       />
     );
 
@@ -47,14 +47,46 @@ describe("ImportPreview", () => {
     expect(onFrameLoad).toHaveBeenCalledOnce();
     expect(onReady).not.toHaveBeenCalled();
 
-    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce }, window);
-    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce: "ef".repeat(16) });
-    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce, extra: true });
+    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce, generation: 1 }, window);
+    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce: "ef".repeat(16), generation: 1 });
+    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce, generation: 1, extra: true });
     expect(onReady).not.toHaveBeenCalled();
 
-    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce });
-    expect(onReady).toHaveBeenCalledOnce();
+    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce, generation: 1 });
+    expect(onReady).toHaveBeenCalledWith(1);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("invalidates readiness on every load and accepts only the current document generation", () => {
+    const onFrameLoad = vi.fn();
+    const onReady = vi.fn();
+    render(
+      <ImportPreview
+        error={false}
+        loaded={false}
+        metadata={metadata}
+        nonce={nonce}
+        onError={vi.fn()}
+        onFrameLoad={onFrameLoad}
+        onReady={onReady}
+        previewUrl="/api/admin/imports/draft-1/visual"
+      />
+    );
+    const iframe = screen.getByTitle("Prévisualisation du run importé") as HTMLIFrameElement;
+
+    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce, generation: 1 });
+    expect(onReady).not.toHaveBeenCalled();
+    fireEvent.load(iframe);
+    expect(onFrameLoad).toHaveBeenLastCalledWith(1);
+    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce, generation: 1 });
+    expect(onReady).toHaveBeenLastCalledWith(1);
+
+    fireEvent.load(iframe);
+    expect(onFrameLoad).toHaveBeenLastCalledWith(2);
+    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce, generation: 1 });
+    expect(onReady).toHaveBeenCalledTimes(1);
+    postFrom(iframe, { type: adminPreviewMessageType, state: "ready", nonce, generation: 2 });
+    expect(onReady).toHaveBeenLastCalledWith(2);
   });
 
   it("reports authenticated runtime failures and removes its message listener on unmount", () => {
@@ -68,16 +100,17 @@ describe("ImportPreview", () => {
         onError={onError}
         onFrameLoad={vi.fn()}
         onReady={vi.fn()}
-        previewUrl="/api/admin/imports/draft-1/visual?preview=short-token"
+        previewUrl="/api/admin/imports/draft-1/visual"
       />
     );
     const iframe = screen.getByTitle("Prévisualisation du run importé") as HTMLIFrameElement;
 
-    postFrom(iframe, { type: adminPreviewMessageType, state: "error", nonce });
+    fireEvent.load(iframe);
+    postFrom(iframe, { type: adminPreviewMessageType, state: "error", nonce, generation: 1 });
     expect(onError).toHaveBeenCalledOnce();
 
     view.unmount();
-    postFrom(iframe, { type: adminPreviewMessageType, state: "error", nonce });
+    postFrom(iframe, { type: adminPreviewMessageType, state: "error", nonce, generation: 1 });
     expect(onError).toHaveBeenCalledOnce();
   });
 });

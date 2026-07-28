@@ -119,6 +119,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
   const inspectionSequence = useRef(0);
   const operationSequence = useRef(0);
   const previewRuntimeFailed = useRef(false);
+  const previewDocumentGeneration = useRef(0);
 
   const canonicalTasks = [...new Set(tasks)].sort((left, right) => left.localeCompare(right, "fr"));
   const [phase, setPhase] = useState<WizardPhase>("identify");
@@ -156,6 +157,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
     setPreviewLoaded(false);
     setPreviewFailed(false);
     previewRuntimeFailed.current = false;
+    previewDocumentGeneration.current = 0;
     setPublishFailed(false);
   }
 
@@ -191,6 +193,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
     setPreviewLoaded(false);
     setPreviewFailed(false);
     previewRuntimeFailed.current = false;
+    previewDocumentGeneration.current = 0;
     setPublishFailed(false);
     setNotice(null);
     setError(null);
@@ -404,12 +407,14 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
       draftToken?: string;
       previewUrl?: string;
       previewNonce?: string;
+      previewSetupToken?: string;
     } & ErrorPayload>(response);
     if (
       !response.ok
       || !payload.draftToken
       || !payload.previewUrl
       || !payload.previewNonce
+      || !payload.previewSetupToken
       || !/^[a-f0-9]{32,}$/.test(payload.previewNonce)
     ) {
       throw new Error(safeError(payload, "Finalisation du brouillon impossible."));
@@ -427,6 +432,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
     setPreviewLoaded(false);
     setPreviewFailed(false);
     previewRuntimeFailed.current = false;
+    previewDocumentGeneration.current = 0;
     setPhase("preview");
 
     try {
@@ -435,16 +441,20 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
       if (
         previewUrl.origin !== window.location.origin
         || previewUrl.pathname !== expectedPath
-        || previewUrl.searchParams.getAll("preview").length !== 1
-        || [...previewUrl.searchParams.keys()].some((key) => key !== "preview")
+        || previewUrl.search
+        || previewUrl.hash
       ) {
         throw new Error("Unsafe preview URL");
       }
-      const previewResponse = await fetch(payload.previewUrl, {
+      const previewResponse = await fetch(`${expectedPath}/setup`, {
         cache: "no-store",
         credentials: "same-origin",
-        headers: { accept: "text/html" },
-        method: "GET"
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": csrf
+        },
+        method: "POST",
+        body: JSON.stringify({ previewSetupToken: payload.previewSetupToken })
       });
       if (operationSequence.current !== operation) return;
       if (!previewResponse.ok) throw new Error("Preview unavailable");
@@ -826,18 +836,22 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
                   loaded={previewLoaded}
                   metadata={draft.metadata}
                   nonce={draft.previewNonce}
-                  onError={() => {
+                  onError={(generation) => {
+                    if (generation !== previewDocumentGeneration.current) return;
                     previewRuntimeFailed.current = true;
-                    setPreviewFrameLoaded(false);
                     setPreviewLoaded(false);
                     setPreviewFailed(true);
                     setError("La prévisualisation n’a pas pu être chargée. Le brouillon reste disponible.");
                   }}
-                  onFrameLoad={() => {
-                    if (!previewRuntimeFailed.current) setPreviewFrameLoaded(true);
+                  onFrameLoad={(generation) => {
+                    previewDocumentGeneration.current = generation;
+                    previewRuntimeFailed.current = false;
+                    setPreviewFrameLoaded(true);
+                    setPreviewLoaded(false);
+                    setPreviewFailed(false);
                   }}
-                  onReady={() => {
-                    if (!previewRuntimeFailed.current) {
+                  onReady={(generation) => {
+                    if (generation === previewDocumentGeneration.current && !previewRuntimeFailed.current) {
                       setPreviewFailed(false);
                       setPreviewLoaded(true);
                       setError(null);

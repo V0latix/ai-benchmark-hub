@@ -1,6 +1,6 @@
 import { readAdminEnvironment } from "../../../../../../lib/admin/env";
 import { GitHubBenchmarkWriter } from "../../../../../../lib/github/write-client";
-import { verifyLiveDraftPreview } from "../../../../../../lib/visuals/draft-preview-auth";
+import { verifyLiveDraftPreviewRequest } from "../../../../../../lib/visuals/draft-preview-auth";
 import { resolveVerifiedDraftPreviewContext } from "../../../../../../lib/visuals/preview-context";
 import {
   adminPreviewCsp,
@@ -14,22 +14,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ draf
     const draftId = (await params).draftId;
     const environment = readAdminEnvironment();
     const search = new URL(request.url).searchParams;
-    const capabilities = search.getAll("preview");
-    if (capabilities.length !== 1 || [...search.keys()].some((key) => key !== "preview")) {
+    if ([...search.keys()].length) {
       return new Response("Preview not available", { status: 404 });
     }
-    const preview = await verifyLiveDraftPreview(
-      capabilities[0],
+    const preview = await verifyLiveDraftPreviewRequest(
+      request,
       environment.sessionSecret,
       draftId,
       new GitHubBenchmarkWriter(environment.githubToken)
     );
     if (!preview) return new Response("Preview not available", { status: 404 });
     const context = resolveVerifiedDraftPreviewContext(preview);
-    const previewQuery = new URLSearchParams({
-      v: previewAssetVersion,
-      preview: capabilities[0]
-    }).toString();
+    const previewQuery = new URLSearchParams({ v: previewAssetVersion }).toString();
     const html = await context.reader.readText(context.source, context.entryPath);
     const assetBase = `/api/admin/imports/${encodeURIComponent(draftId)}/visual/asset`;
     let body = injectStandalonePreview(html, assetBase, previewQuery, { nonce: preview.nonce });

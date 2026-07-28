@@ -3,7 +3,7 @@
 import { AlertTriangle, CheckCircle2, Eye } from "lucide-react";
 import { useEffect, useRef } from "react";
 
-import { adminPreviewMessageType } from "../lib/visuals/preview";
+import { adminPreviewInitMessageType, adminPreviewMessageType } from "../lib/visuals/preview";
 
 type ImportPreviewProps = {
   error: boolean;
@@ -16,9 +16,9 @@ type ImportPreviewProps = {
     notes: string;
   };
   nonce: string;
-  onError: () => void;
-  onFrameLoad: () => void;
-  onReady: () => void;
+  onError: (generation: number) => void;
+  onFrameLoad: (generation: number) => void;
+  onReady: (generation: number) => void;
   previewUrl: string;
 };
 
@@ -34,32 +34,39 @@ export function ImportPreview({
 }: ImportPreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const frameLoaded = useRef(false);
+  const generation = useRef(0);
   const onErrorRef = useRef(onError);
+  const onFrameLoadRef = useRef(onFrameLoad);
   const onReadyRef = useRef(onReady);
 
   useEffect(() => {
     onErrorRef.current = onError;
+    onFrameLoadRef.current = onFrameLoad;
     onReadyRef.current = onReady;
-  }, [onError, onReady]);
+  }, [onError, onFrameLoad, onReady]);
 
   useEffect(() => {
     frameLoaded.current = false;
+    generation.current = 0;
     function receiveReadiness(event: MessageEvent) {
       if (event.source !== iframeRef.current?.contentWindow) return;
       if (!event.data || typeof event.data !== "object" || Array.isArray(event.data)) return;
       const message = event.data as Record<string, unknown>;
       if (
-        Object.keys(message).sort().join(",") !== "nonce,state,type"
+        Object.keys(message).sort().join(",") !== "generation,nonce,state,type"
         || message.type !== adminPreviewMessageType
         || message.nonce !== nonce
+        || !Number.isSafeInteger(message.generation)
+        || (message.generation as number) <= 0
+        || message.generation !== generation.current
         || (message.state !== "ready" && message.state !== "error")
       ) {
         return;
       }
       if (message.state === "error") {
-        onErrorRef.current();
+        onErrorRef.current(generation.current);
       } else if (frameLoaded.current) {
-        onReadyRef.current();
+        onReadyRef.current(generation.current);
       }
     }
     window.addEventListener("message", receiveReadiness);
@@ -88,10 +95,17 @@ export function ImportPreview({
         </div>
         <iframe
           className="block h-[32rem] w-full bg-white"
-          onErrorCapture={onError}
+          onErrorCapture={() => onErrorRef.current(generation.current)}
           onLoad={() => {
+            const nextGeneration = generation.current + 1;
+            generation.current = nextGeneration;
             frameLoaded.current = true;
-            onFrameLoad();
+            onFrameLoadRef.current(nextGeneration);
+            iframeRef.current?.contentWindow?.postMessage({
+              type: adminPreviewInitMessageType,
+              nonce,
+              generation: nextGeneration
+            }, "*");
           }}
           ref={iframeRef}
           sandbox="allow-scripts"

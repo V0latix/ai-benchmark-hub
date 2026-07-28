@@ -10,6 +10,7 @@ export function getPreviewProxyUrl(runId: string): string {
 export const previewAssetVersion = "tailwind-2";
 export const interactivePreviewSandbox = "allow-scripts";
 export const adminPreviewMessageType = "benchmark-admin-preview";
+export const adminPreviewInitMessageType = "benchmark-admin-preview-init";
 export const interactivePreviewCsp = "default-src 'none'; script-src 'self' http: https: 'unsafe-inline'; style-src 'self' http: https: 'unsafe-inline'; img-src 'self' http: https: data: blob:; font-src http: https: data:; connect-src http: https:; object-src 'none'; frame-ancestors 'self'; form-action 'none'";
 export const adminPreviewCsp = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'self'; base-uri 'none'";
 export const interactivePreviewCorsHeaders = { "Access-Control-Allow-Origin": "*" };
@@ -107,6 +108,7 @@ type AdminPreviewReadiness = {
 
 function adminReadinessBootstrap(readiness: AdminPreviewReadiness, waitForEntry: boolean): string {
   const messageType = JSON.stringify(adminPreviewMessageType);
+  const initMessageType = JSON.stringify(adminPreviewInitMessageType);
   const nonce = JSON.stringify(readiness.nonce);
   return `<script>(() => {
     const previewStorage = new Map();
@@ -117,8 +119,10 @@ function adminReadinessBootstrap(readiness: AdminPreviewReadiness, waitForEntry:
       windowLoaded: document.readyState === "complete",
       entryLoaded: ${waitForEntry ? "false" : "true"},
       readySent: false,
+      generation: null,
       post(nextState) {
-        parent.postMessage({ type: ${messageType}, state: nextState, nonce: ${nonce} }, "*");
+        if (!Number.isSafeInteger(this.generation) || this.generation <= 0) return;
+        parent.postMessage({ type: ${messageType}, state: nextState, nonce: ${nonce}, generation: this.generation }, "*");
       },
       fail() {
         this.failed = true;
@@ -126,9 +130,9 @@ function adminReadinessBootstrap(readiness: AdminPreviewReadiness, waitForEntry:
         this.post("error");
       },
       maybeReady() {
-        if (this.failed || this.readySent || !this.windowLoaded || !this.entryLoaded) return;
+        if (this.failed || this.readySent || !this.windowLoaded || !this.entryLoaded || this.generation === null) return;
         queueMicrotask(() => {
-          if (this.failed || this.readySent || !this.windowLoaded || !this.entryLoaded) return;
+          if (this.failed || this.readySent || !this.windowLoaded || !this.entryLoaded || this.generation === null) return;
           this.readySent = true;
           this.post("ready");
         });
@@ -141,6 +145,21 @@ function adminReadinessBootstrap(readiness: AdminPreviewReadiness, waitForEntry:
     Object.defineProperty(globalThis, "__benchmarkAdminPreview", { value: state });
     addEventListener("error", () => state.fail(), true);
     addEventListener("unhandledrejection", () => state.fail());
+    addEventListener("message", (event) => {
+      if (event.source !== parent || !event.data || typeof event.data !== "object" || Array.isArray(event.data)) return;
+      const message = event.data;
+      if (
+        Object.keys(message).sort().join(",") !== "generation,nonce,type"
+        || message.type !== ${initMessageType}
+        || message.nonce !== ${nonce}
+        || !Number.isSafeInteger(message.generation)
+        || message.generation <= 0
+      ) return;
+      state.generation = message.generation;
+      state.readySent = false;
+      if (state.failed) state.post("error");
+      else state.maybeReady();
+    });
     addEventListener("load", () => { state.windowLoaded = true; state.maybeReady(); }, { once: true });
     document.documentElement.dataset.previewBootstrap = "ready";
     state.maybeReady();
@@ -158,7 +177,10 @@ export function injectInteractivePreview(
     const packagePath = `${name}@${version}`;
     return [[name, withPreviewQuery(getPreviewVendorUrl(assetBaseUrl, packagePath), query)], [`${name}/`, withPreviewQuery(`${getPreviewVendorUrl(assetBaseUrl, packagePath)}/`, query)]];
   }));
-  const entry = withPreviewQuery(`${assetBaseUrl}/src/main.tsx?preview=${previewAssetVersion}`, query);
+  const entry = withPreviewQuery(
+    `${assetBaseUrl}/src/main.tsx${query === undefined ? `?preview=${previewAssetVersion}` : ""}`,
+    query
+  );
   const withoutViteEntry = html.replace(/<script\b[^>]*\bsrc=["'](?:\/|\.\/)?src\/[^"']+["'][^>]*><\/script>/i, "");
   let rewritten = rewritePreviewHtmlUrls(withoutViteEntry, assetBaseUrl, query);
   if (readiness) {

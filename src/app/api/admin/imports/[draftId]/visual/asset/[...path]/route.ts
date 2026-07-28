@@ -1,6 +1,6 @@
 import { readAdminEnvironment } from "../../../../../../../../lib/admin/env";
 import { GitHubBenchmarkWriter } from "../../../../../../../../lib/github/write-client";
-import { verifyLiveDraftPreview } from "../../../../../../../../lib/visuals/draft-preview-auth";
+import { verifyLiveDraftPreviewRequest } from "../../../../../../../../lib/visuals/draft-preview-auth";
 import { resolveVerifiedDraftPreviewContext } from "../../../../../../../../lib/visuals/preview-context";
 import { compilePreviewStylesheet, extractTailwindCandidates, transformPreviewModule, transformPreviewStylesheet } from "../../../../../../../../lib/visuals/module";
 import { getPreviewAssetContentType } from "../../../../../../../../lib/visuals/assets";
@@ -14,13 +14,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ draf
     if (!requested || requested.includes("..")) throw new Error("unsafe");
     const environment = readAdminEnvironment();
     const search = new URL(request.url).searchParams;
-    const capabilities = search.getAll("preview");
     const versions = search.getAll("v");
-    if (capabilities.length !== 1 || versions.length > 1 || (versions[0] && versions[0] !== previewAssetVersion)) throw new Error("unauthorized");
-    const token = capabilities[0];
-    const previewQuery = new URLSearchParams({ ...(versions[0] ? { v: versions[0] } : {}), preview: token }).toString();
-    const preview = await verifyLiveDraftPreview(
-      token,
+    if (
+      versions.length > 1
+      || (versions[0] && versions[0] !== previewAssetVersion)
+      || search.has("preview")
+    ) throw new Error("unauthorized");
+    const previewQuery = new URLSearchParams(versions[0] ? { v: versions[0] } : {}).toString();
+    const preview = await verifyLiveDraftPreviewRequest(
+      request,
       environment.sessionSecret,
       draftId,
       new GitHubBenchmarkWriter(environment.githubToken)

@@ -279,6 +279,7 @@ export async function finalizeDraft(
   draftToken: string;
   previewUrl: string;
   previewNonce: string;
+  previewSetupToken: string;
 }> {
   const now = requiredNow(options.now ?? Date.now());
   const metadata = normalizeMetadata(input.metadata);
@@ -351,7 +352,8 @@ export async function finalizeDraft(
     appSlug: metadata.appSlug,
     runId: metadata.runId,
     draftToken,
-    previewUrl: `/api/admin/imports/${input.draftId}/visual?preview=${encodeURIComponent(previewToken)}`,
-    previewNonce
+    previewUrl: `/api/admin/imports/${input.draftId}/visual`,
+    previewNonce,
+    previewSetupToken: previewToken
   };
 }

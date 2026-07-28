@@ -56,7 +56,7 @@ export function transformPreviewModule(source: string, path: string, query?: str
   const withoutStyles = resolvedSource.replace(cssImport, "").replace(assetImport, "");
   const loader = path.endsWith(".tsx") ? ts.JsxEmit.ReactJSX : ts.JsxEmit.Preserve;
   const transformed = rewriteBareModuleSpecifiers(rewriteLocalModuleSpecifiers(ts.transpileModule(withoutStyles, { compilerOptions: { jsx: loader, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText, query), query, vendor);
-  const styleLoader = styles.map((style, index) => `const previewStyle${index} = document.createElement("link"); previewStyle${index}.rel = "stylesheet"; previewStyle${index}.href = new URL(${JSON.stringify(withPreviewQuery(`${style}?preview=${previewAssetVersion}`, query))}, import.meta.url).href; document.head.append(previewStyle${index});`).join("\n");
+  const styleLoader = styles.map((style, index) => `const previewStyle${index} = document.createElement("link"); previewStyle${index}.rel = "stylesheet"; previewStyle${index}.href = new URL(${JSON.stringify(withPreviewQuery(`${style}${query === undefined ? `?preview=${previewAssetVersion}` : ""}`, query))}, import.meta.url).href; document.head.append(previewStyle${index});`).join("\n");
   const assetLoader = assets.map(({ name, path: assetPath }) => `const ${name} = new URL(${JSON.stringify(withPreviewQuery(assetPath, query))}, import.meta.url).href;`).join("\n");
   return `${styleLoader}\n${assetLoader}\n${transformed}`;
 }

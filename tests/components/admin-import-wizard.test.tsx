@@ -10,7 +10,9 @@ import { adminPreviewMessageType } from "../../src/lib/visuals/preview";
 const csrf = "csrf-value";
 const tasks = ["figma-clone", "gmail-clone"];
 const previewNonce = "cd".repeat(16);
-const previewUrl = "/api/admin/imports/draft-1/visual?preview=preview-token";
+const previewSetupToken = "preview-setup-token";
+const previewUrl = "/api/admin/imports/draft-1/visual";
+const previewSetupUrl = "/api/admin/imports/draft-1/visual/setup";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -56,15 +58,13 @@ function successfulFetch(options: {
       return jsonResponse({
         draftToken: "draft-token",
         previewUrl,
-        previewNonce
+        previewNonce,
+        previewSetupToken
       });
     }
-    if (url === previewUrl && init?.method === "GET") {
+    if (url === previewSetupUrl && init?.method === "POST") {
       const status = options.previewStatus ?? 200;
-      return new Response(status >= 200 && status < 300 ? "<html></html>" : "Preview not available", {
-        status,
-        headers: { "content-type": "text/html" }
-      });
+      return new Response(null, { status: status >= 200 && status < 300 ? 204 : status });
     }
     if (url === "/api/admin/imports/draft-1/publish") {
       publishAttempts += 1;
@@ -93,17 +93,19 @@ function postPreviewMessage(
   iframe: HTMLIFrameElement,
   state: "ready" | "error",
   nonce = previewNonce,
-  source: MessageEventSource | null = iframe.contentWindow
+  source: MessageEventSource | null = iframe.contentWindow,
+  generation = 1
 ) {
   fireEvent(window, new MessageEvent("message", {
-    data: { type: adminPreviewMessageType, state, nonce },
+    data: { type: adminPreviewMessageType, state, nonce, generation },
     source
   }));
 }
 
 function markPreviewReady(iframe: HTMLIFrameElement) {
   fireEvent.load(iframe);
-  postPreviewMessage(iframe, "ready");
+  postPreviewMessage(iframe, "ready", previewNonce, iframe.contentWindow, 1);
+  postPreviewMessage(iframe, "ready", previewNonce, iframe.contentWindow, 2);
 }
 
 afterEach(() => {
@@ -127,13 +129,20 @@ describe("AdminImportWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
     const preview = await screen.findByTitle("Prévisualisation du run importé");
     expect(fetch).toHaveBeenCalledWith(
-      previewUrl,
+      previewSetupUrl,
       expect.objectContaining({
         cache: "no-store",
         credentials: "same-origin",
-        method: "GET"
+        method: "POST",
+        headers: expect.objectContaining({
+          "content-type": "application/json",
+          "x-csrf-token": csrf
+        }),
+        body: JSON.stringify({ previewSetupToken })
       })
     );
+    expect(preview).toHaveAttribute("src", previewUrl);
+    expect(preview).not.toHaveAttribute("src", expect.stringContaining(previewSetupToken));
     expect(preview).toHaveAttribute("sandbox", "allow-scripts");
     expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
 
@@ -142,7 +151,8 @@ describe("AdminImportWizard", () => {
     postPreviewMessage(preview as HTMLIFrameElement, "ready", "ef".repeat(16));
     postPreviewMessage(preview as HTMLIFrameElement, "ready", previewNonce, window);
     expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
-    postPreviewMessage(preview as HTMLIFrameElement, "ready");
+    postPreviewMessage(preview as HTMLIFrameElement, "ready", previewNonce, (preview as HTMLIFrameElement).contentWindow, 1);
+    postPreviewMessage(preview as HTMLIFrameElement, "ready", previewNonce, (preview as HTMLIFrameElement).contentWindow, 2);
     expect(screen.getByText("Aperçu chargé")).toHaveAttribute("role", "status");
     expect(screen.getByRole("button", { name: "Publier le run" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Publier le run" }));
@@ -218,14 +228,12 @@ describe("AdminImportWizard", () => {
         return Promise.resolve(jsonResponse({
           draftToken: "draft-token",
           previewUrl,
-          previewNonce
+          previewNonce,
+          previewSetupToken
         }));
       }
-      if (url === previewUrl) {
-        return Promise.resolve(new Response("<html></html>", {
-          status: 200,
-          headers: { "content-type": "text/html" }
-        }));
+      if (url === previewSetupUrl) {
+        return Promise.resolve(new Response(null, { status: 204 }));
       }
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     });
@@ -280,14 +288,12 @@ describe("AdminImportWizard", () => {
         return jsonResponse({
           draftToken: "draft-token",
           previewUrl,
-          previewNonce
+          previewNonce,
+          previewSetupToken
         });
       }
-      if (url === previewUrl) {
-        return new Response("<html></html>", {
-          status: 200,
-          headers: { "content-type": "text/html" }
-        });
+      if (url === previewSetupUrl) {
+        return new Response(null, { status: 204 });
       }
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     });
@@ -365,6 +371,29 @@ describe("AdminImportWizard", () => {
 
     expect(await screen.findByText(/prévisualisation n’a pas pu être chargée/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
+  });
+
+  it("invalidates a ready preview on reload and requires readiness from the new document", async () => {
+    vi.stubGlobal("fetch", successfulFetch());
+    render(<AdminImportWizard csrf={csrf} tasks={tasks} />);
+
+    await identifyRun();
+    fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
+    const preview = await screen.findByTitle("Prévisualisation du run importé") as HTMLIFrameElement;
+
+    postPreviewMessage(preview, "ready", previewNonce, preview.contentWindow, 1);
+    expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
+    fireEvent.load(preview);
+    expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
+    postPreviewMessage(preview, "ready", previewNonce, preview.contentWindow, 1);
+    expect(screen.getByRole("button", { name: "Publier le run" })).toBeEnabled();
+
+    fireEvent.load(preview);
+    expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
+    postPreviewMessage(preview, "ready", previewNonce, preview.contentWindow, 1);
+    expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
+    postPreviewMessage(preview, "ready", previewNonce, preview.contentWindow, 2);
+    expect(screen.getByRole("button", { name: "Publier le run" })).toBeEnabled();
   });
 
   it("retains the same draft token when publication fails and succeeds on retry", async () => {

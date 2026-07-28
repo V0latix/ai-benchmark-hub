@@ -80,7 +80,8 @@ export function createFinalizeImportHandler(
       return json({
         draftToken: result.draftToken,
         previewUrl: result.previewUrl,
-        previewNonce: result.previewNonce
+        previewNonce: result.previewNonce,
+        previewSetupToken: result.previewSetupToken
       });
     } catch {
       return json({ error: "Import invalide" }, 400);

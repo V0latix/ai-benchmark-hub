@@ -267,7 +267,7 @@ describe("admin import routes", () => {
     const body = JSON.parse(text);
 
     expect(response.status).toBe(200);
-    expect(Object.keys(body).sort()).toEqual(["draftToken", "previewNonce", "previewUrl"]);
+    expect(Object.keys(body).sort()).toEqual(["draftToken", "previewNonce", "previewSetupToken", "previewUrl"]);
     const draft = verifyDraftToken(body.draftToken, SECRET, DRAFT_ID, NOW);
     expect(draft).toMatchObject({
       task: "gmail-clone",
@@ -275,8 +275,8 @@ describe("admin import routes", () => {
     });
     expect(body.previewNonce).toMatch(/^[a-f0-9]{32,}$/);
     const previewUrl = new URL(body.previewUrl, "https://hub.example");
-    expect([...previewUrl.searchParams.keys()]).toEqual(["preview"]);
-    expect(verifyPreviewToken(previewUrl.searchParams.get("preview")!, SECRET, {
+    expect([...previewUrl.searchParams.keys()]).toEqual([]);
+    expect(verifyPreviewToken(body.previewSetupToken, SECRET, {
       draftId: DRAFT_ID,
       branch: draft!.branch,
       commitSha: draft!.commitSha,
@@ -285,6 +285,7 @@ describe("admin import routes", () => {
       nonce: body.previewNonce
     }, NOW)).not.toBeNull();
     expect(body.previewUrl).not.toContain(body.draftToken);
+    expect(body.previewUrl).not.toContain(body.previewSetupToken);
     expect(text).not.toContain(SECRET);
     expect(text).not.toContain(env.githubToken);
   });
