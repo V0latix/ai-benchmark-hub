@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { filterRuns, RunTable } from "../../src/components/run-table";
 import type { NormalizedRun } from "../../src/lib/sources/types";
 
 const run = (id: string, overrides: Partial<NormalizedRun>) => ({ id, sourceId: "source-a", model: "model-a", harness: "harness-a", status: "success", score: 0.5, totalCostUsd: 1, durationMs: 10, createdAt: "2026-01-01T00:00:00.000Z", ...overrides }) as NormalizedRun;
+
+afterEach(cleanup);
 
 describe("filterRuns", () => {
   it("does not expose a source filter or column in the single-source inventory", () => {

@@ -50,12 +50,13 @@ describe("admin import page", () => {
     expect(screen.queryByText("Import bientôt disponible")).not.toBeInTheDocument();
   });
 
-  it("renders the import shell only for a verified server-side session", async () => {
+  it("renders the existing task catalog only for a verified server-side session", async () => {
     cookieStore.get.mockReturnValue({ value: createAdminSession("session-secret", { csrf: "csrf" }) });
 
     await renderPage();
 
-    expect(screen.getByText("Import bientôt disponible")).toBeInTheDocument();
+    expect(screen.getByLabelText("Task")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "gmail-clone" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Mot de passe administrateur")).not.toBeInTheDocument();
     expect(screen.queryByText("csrf")).not.toBeInTheDocument();
   });

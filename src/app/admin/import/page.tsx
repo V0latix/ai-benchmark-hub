@@ -4,6 +4,7 @@ import { AdminImportWizard } from "../../../components/admin-import-wizard";
 import { AdminLoginForm } from "../../../components/admin-login-form";
 import { verifyAdminSession } from "../../../lib/admin/auth";
 import { readAdminEnvironment } from "../../../lib/admin/env";
+import { getTaskCards } from "../../../lib/storage/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,9 @@ export default async function AdminImportPage() {
     // Hide server configuration and authentication details from this page.
   }
 
-  if (csrf) return <AdminImportWizard csrf={csrf} />;
+  if (csrf) {
+    const tasks = (await getTaskCards()).map((card) => card.task);
+    return <AdminImportWizard csrf={csrf} tasks={tasks} />;
+  }
   return <LoginView />;
 }
