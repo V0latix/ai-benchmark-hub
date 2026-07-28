@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   benchmarkGitWriterValidators,
+  GitBranchConflictError,
   type BenchmarkGitWriter,
   type GitTreeEntry
 } from "../../src/lib/github/write-client";
@@ -18,6 +19,7 @@ export class InMemoryGitWriter implements BenchmarkGitWriter {
   readonly textFiles = new Map<string, string>();
   readonly treeEntries = new Map<string, Array<{ path: string; type: string; sha: string }>>();
   failFirstMainUpdate = false;
+  onFirstMainUpdateConflict: (() => void | Promise<void>) | null = null;
   private mainUpdateFailures = 0;
   private readonly commitTrees = new Map<string, string>([["main-commit", "main-tree"]]);
 
@@ -43,6 +45,16 @@ export class InMemoryGitWriter implements BenchmarkGitWriter {
     const commitSha = this.refs.get(ref);
     if (!commitSha) throw new Error(`Unknown ref: ${ref}`);
     return { commitSha, treeSha: this.commitTrees.get(commitSha) ?? "main-tree" };
+  }
+
+  async getCommit(commitSha: string): Promise<{ commitSha: string; treeSha: string; parentSha: string }> {
+    const commit = this.commits.find((entry) => entry.sha === commitSha);
+    if (!commit) throw new Error(`Unknown commit: ${commitSha}`);
+    return {
+      commitSha,
+      treeSha: commit.treeSha,
+      parentSha: commit.parentSha
+    };
   }
 
   async createBlob(bytes: Uint8Array): Promise<string> {
@@ -79,7 +91,8 @@ export class InMemoryGitWriter implements BenchmarkGitWriter {
     if (!benchmarkGitWriterValidators.updateBranch(branch)) throw new Error("Unsafe Git branch");
     this.updateAttempts.push({ branch, commitSha, force: false });
     if (branch === "main" && this.failFirstMainUpdate && this.mainUpdateFailures++ === 0) {
-      throw new Error("GitHub request failed (422)");
+      await this.onFirstMainUpdateConflict?.();
+      throw new GitBranchConflictError();
     }
     const currentCommitSha = this.refs.get(branch);
     if (!currentCommitSha) throw new Error(`Unknown ref: ${branch}`);
@@ -99,7 +112,7 @@ export class InMemoryGitWriter implements BenchmarkGitWriter {
 
   async readText(path: string, ref: string): Promise<string | null> {
     if (!benchmarkGitWriterValidators.repositoryPath(path)) throw new Error("Unsafe repository path");
-    if (!benchmarkGitWriterValidators.readRef(ref)) throw new Error("Unsafe Git ref");
+    if (!benchmarkGitWriterValidators.readRef(ref) && !this.commitTrees.has(ref)) throw new Error("Unsafe Git ref");
     return this.textFiles.get(`${ref}:${path}`) ?? this.textFiles.get(path) ?? null;
   }
 

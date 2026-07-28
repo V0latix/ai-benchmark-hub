@@ -10,6 +10,7 @@ import {
   IMPORT_TOKEN_TTL_MS,
   signDraftToken,
   signUploadToken,
+  verifyDraftToken,
   verifyFileReceipt,
   type FileReceiptPayload
 } from "./receipts";
@@ -27,6 +28,13 @@ export type FinalizeDraftInput = {
   metadata: DraftMetadataInput;
   receipts: string[];
   draftId: string;
+};
+
+export type CancelDraftInput = {
+  draftId: string;
+  draftToken: string;
+  secret: string;
+  now?: number;
 };
 
 type ClockOptions = {
@@ -229,6 +237,24 @@ export async function beginDraft(
       expiresAt: now + IMPORT_TOKEN_TTL_MS
     }, secret)
   };
+}
+
+export async function cancelDraft(
+  input: CancelDraftInput,
+  writer: BenchmarkGitWriter
+): Promise<void> {
+  const draft = verifyDraftToken(
+    input.draftToken,
+    input.secret,
+    input.draftId,
+    input.now ?? Date.now()
+  );
+  if (!draft) throw new Error("Invalid or expired import draft");
+  const head = await writer.getHead(draft.branch);
+  if (head.commitSha !== draft.commitSha) {
+    throw new Error("Import draft no longer matches its token");
+  }
+  await writer.deleteBranch(draft.branch);
 }
 
 export async function finalizeDraft(

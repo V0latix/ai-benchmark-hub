@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createBenchmarkGitWriter, GitHubBenchmarkWriter } from "../../src/lib/github/write-client";
+import {
+  createBenchmarkGitWriter,
+  GitBranchConflictError,
+  GitHubBenchmarkWriter
+} from "../../src/lib/github/write-client";
 import { InMemoryGitWriter } from "../fixtures/in-memory-git-writer";
 
 type FetchCall = { input: string; init?: RequestInit };
@@ -107,6 +111,35 @@ describe("GitHubBenchmarkWriter", () => {
 
     await expect(writer.listTree("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
       .rejects.toThrow("GitHub response was invalid");
+  });
+
+  it("reads the immutable draft commit's single parent for an exact tree diff", async () => {
+    const commitSha = "a".repeat(40);
+    const parentSha = "b".repeat(40);
+    const treeSha = "c".repeat(40);
+    const github = fakeGitHub([response({
+      tree: { sha: treeSha },
+      parents: [{ sha: parentSha }]
+    })]);
+    const writer = new GitHubBenchmarkWriter("test-token", github.fetcher as typeof fetch);
+
+    await expect(writer.getCommit(commitSha)).resolves.toEqual({
+      commitSha,
+      treeSha,
+      parentSha
+    });
+    expect(github.calls[0]?.input).toBe(
+      `https://api.github.com/repos/Melvynx/benchmarks/git/commits/${commitSha}`
+    );
+  });
+
+  it("classifies a rejected fast-forward update as a retryable conflict without forcing", async () => {
+    const github = fakeGitHub([response({ message: "Reference update failed" }, 422)]);
+    const writer = new GitHubBenchmarkWriter("test-token", github.fetcher as typeof fetch);
+
+    await expect(writer.updateBranch("main", "next-commit"))
+      .rejects.toBeInstanceOf(GitBranchConflictError);
+    expect(body(github.calls[0]!)).toEqual({ sha: "next-commit", force: false });
   });
 
   it("rejects every malformed recursive tree entry instead of silently omitting it", async () => {

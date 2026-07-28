@@ -5,8 +5,15 @@ export type GitTreeEntry = {
   sha: string;
 };
 
+export class GitBranchConflictError extends Error {
+  constructor() {
+    super("Git branch changed");
+  }
+}
+
 export interface BenchmarkGitWriter {
   getHead(ref: string): Promise<{ commitSha: string; treeSha: string }>;
+  getCommit(commitSha: string): Promise<{ commitSha: string; treeSha: string; parentSha: string }>;
   createBlob(bytes: Uint8Array): Promise<string>;
   createTree(baseTreeSha: string, entries: GitTreeEntry[]): Promise<string>;
   createCommit(message: string, treeSha: string, parentSha: string): Promise<string>;
@@ -26,7 +33,7 @@ const importBranch = /^imports\/[a-z0-9-]{20,}$/;
 const commitSha = /^[a-f0-9]{40}$/i;
 
 type GitReferenceResponse = { object?: { sha?: unknown } };
-type GitCommitResponse = { tree?: { sha?: unknown } };
+type GitCommitResponse = { tree?: { sha?: unknown }; parents?: Array<{ sha?: unknown }> };
 type ShaResponse = { sha?: unknown };
 type MatchingRefResponse = Array<{ ref?: unknown }>;
 type ContentResponse = { content?: unknown; encoding?: unknown };
@@ -99,6 +106,19 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
     return { commitSha, treeSha: requiredSha(commit.tree?.sha) };
   }
 
+  async getCommit(value: string): Promise<{ commitSha: string; treeSha: string; parentSha: string }> {
+    if (!commitSha.test(value)) throw new Error("Unsafe Git commit");
+    const commit = await this.json<GitCommitResponse>(`/git/commits/${encodeURIComponent(value)}`);
+    if (!Array.isArray(commit.parents) || commit.parents.length !== 1) {
+      throw new Error("GitHub response was invalid");
+    }
+    return {
+      commitSha: value,
+      treeSha: requiredSha(commit.tree?.sha),
+      parentSha: requiredSha(commit.parents[0]?.sha)
+    };
+  }
+
   async createBlob(bytes: Uint8Array): Promise<string> {
     const result = await this.json<ShaResponse>("/git/blobs", {
       method: "POST",
@@ -138,10 +158,11 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
 
   async updateBranch(branch: string, commitSha: string): Promise<void> {
     if (!benchmarkGitWriterValidators.updateBranch(branch)) throw new Error("Unsafe Git branch");
-    await this.json(`/git/refs/heads/${encodePath(branch)}`, {
+    const response = await this.request(`/git/refs/heads/${encodePath(branch)}`, {
       method: "PATCH",
       body: JSON.stringify({ sha: commitSha, force: false })
-    });
+    }, [422]);
+    if (response.status === 422) throw new GitBranchConflictError();
   }
 
   async deleteBranch(branch: string): Promise<void> {
@@ -198,7 +219,11 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
     };
   }
 
-  private async request(path: string, init: RequestInit = {}): Promise<Response> {
+  private async request(
+    path: string,
+    init: RequestInit = {},
+    acceptedErrorStatuses: number[] = []
+  ): Promise<Response> {
     let response: Response;
     try {
       const headers = init.body === undefined
@@ -208,7 +233,9 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
     } catch {
       throw new Error("GitHub request failed");
     }
-    if (!response.ok && response.status !== 404) throw new Error(`GitHub request failed (${response.status})`);
+    if (!response.ok && response.status !== 404 && !acceptedErrorStatuses.includes(response.status)) {
+      throw new Error(`GitHub request failed (${response.status})`);
+    }
     return response;
   }
 

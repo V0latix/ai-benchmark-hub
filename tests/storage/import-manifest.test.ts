@@ -6,6 +6,7 @@ import {
   loadImportedRunsSnapshot,
   mergeImportedRuns,
   parseImportedRunManifest,
+  parseWritableImportedRunManifest,
   type ImportedRunsSnapshot
 } from "../../src/lib/storage/import-manifest";
 
@@ -35,6 +36,23 @@ function createFakeDurableCache(loader: () => Promise<ImportedRunsSnapshot>) {
 }
 
 describe("import manifest", () => {
+  it("requires a complete version-1 manifest before a publication can append", () => {
+    const run = makeNormalizedRun("publishable");
+    expect(parseWritableImportedRunManifest(null)).toEqual({ version: 1, runs: [] });
+    expect(parseWritableImportedRunManifest(JSON.stringify({
+      version: 1,
+      runs: [run]
+    }))).toEqual({ version: 1, runs: [run] });
+
+    for (const invalid of [
+      "{",
+      JSON.stringify({ version: 2, runs: [] }),
+      JSON.stringify({ version: 1, runs: [{ id: "partial" }] })
+    ]) {
+      expect(() => parseWritableImportedRunManifest(invalid)).toThrow(/manifest/i);
+    }
+  });
+
   it("keeps valid Melvynx runs and drops invalid entries", () => {
     const parsed = parseImportedRunManifest({ version: 1, runs: [makeNormalizedRun("ok"), { id: "bad" }] });
 

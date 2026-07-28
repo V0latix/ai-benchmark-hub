@@ -81,6 +81,19 @@ export function parseImportedRunManifest(value: unknown): ParsedImportedRuns {
   return { runs, warnings };
 }
 
+export function parseWritableImportedRunManifest(text: string | null): ImportedRunManifest {
+  if (text === null) return { version: 1, runs: [] };
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error("Import manifest is invalid");
+  }
+  const parsed = parseImportedRunManifest(value);
+  if (parsed.warnings.length > 0) throw new Error("Import manifest is invalid");
+  return { version: 1, runs: parsed.runs };
+}
+
 function isImportedRunManifest(value: unknown): value is { version: 1; runs: unknown[] } {
   return isRecord(value) && value.version === 1 && Array.isArray(value.runs);
 }
