@@ -3,7 +3,7 @@ import { verifyPreviewTokenForDraft } from "../../../../../../../../lib/imports/
 import { resolveVerifiedDraftPreviewContext } from "../../../../../../../../lib/visuals/preview-context";
 import { compilePreviewStylesheet, extractTailwindCandidates, transformPreviewModule, transformPreviewStylesheet } from "../../../../../../../../lib/visuals/module";
 import { getPreviewAssetContentType } from "../../../../../../../../lib/visuals/assets";
-import { interactivePreviewCorsHeaders } from "../../../../../../../../lib/visuals/preview";
+import { interactivePreviewCorsHeaders, previewAssetVersion } from "../../../../../../../../lib/visuals/preview";
 
 const candidates = (path: string) => /\.[a-z0-9]+$/i.test(path) ? [path] : [`${path}.tsx`, `${path}.ts`, `${path}.jsx`, `${path}.js`];
 
@@ -12,7 +12,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ draf
     const { draftId, path } = await params; const requested = path.join("/");
     if (!requested || requested.includes("..")) throw new Error("unsafe");
     const secret = readAdminEnvironment().sessionSecret;
-    const token = new URL(request.url).searchParams.get("preview") ?? "";
+    const search = new URL(request.url).searchParams;
+    const capabilities = search.getAll("preview");
+    const versions = search.getAll("v");
+    if (capabilities.length !== 1 || versions.length > 1 || (versions[0] && versions[0] !== previewAssetVersion)) throw new Error("unauthorized");
+    const token = capabilities[0];
+    const previewQuery = new URLSearchParams({ ...(versions[0] ? { v: versions[0] } : {}), preview: token }).toString();
     const preview = verifyPreviewTokenForDraft(token, secret, draftId);
     if (!preview) throw new Error("unauthorized");
     const context = resolveVerifiedDraftPreviewContext(preview);
@@ -21,7 +26,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ draf
         const isModule = /\.[cm]?[jt]sx?$/i.test(filePath), css = filePath.endsWith(".css");
         if (!isModule && !css) { const bytes = await context.reader.readBinary(context.source, filePath); return new Response(new Uint8Array(bytes), { headers: { "Content-Type": getPreviewAssetContentType(filePath), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } }); }
         const text = await context.reader.readText(context.source, filePath);
-        const body = isModule ? transformPreviewModule(text, filePath) : css && /@import\s+["']tailwindcss["']/i.test(text) ? await compilePreviewStylesheet(text, extractTailwindCandidates((await Promise.all((await context.reader.listFiles(context.source)).filter((item) => /\.[cm]?[jt]sx?$/i.test(item)).map((item) => context.reader.readText(context.source, item).catch(() => "")))).join("\n"))) : transformPreviewStylesheet(text);
+        const manifest = isModule ? JSON.parse(await context.reader.readText(context.source, `${context.artifactDirectory}/package.json`)) as { dependencies?: Record<string, string> } : null;
+        const body = isModule
+          ? transformPreviewModule(text, filePath, previewQuery, { assetBaseUrl: `/api/admin/imports/${encodeURIComponent(draftId)}/visual/asset`, dependencies: manifest?.dependencies ?? {} })
+          : css && /@import\s+["']tailwindcss["']/i.test(text)
+            ? await compilePreviewStylesheet(text, extractTailwindCandidates((await Promise.all((await context.reader.listFiles(context.source)).filter((item) => /\.[cm]?[jt]sx?$/i.test(item)).map((item) => context.reader.readText(context.source, item).catch(() => "")))).join("\n")), previewQuery)
+            : transformPreviewStylesheet(text, previewQuery);
         return new Response(body, { headers: { "Content-Type": getPreviewAssetContentType(isModule ? "module.js" : filePath), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } });
       } catch { /* safe candidate fallback */ }
     }

@@ -5,7 +5,7 @@ import { join, posix } from "node:path";
 import { compile } from "tailwindcss";
 import ts from "typescript";
 
-import { previewAssetVersion } from "./preview";
+import { getPreviewVendorUrl, previewAssetVersion, withPreviewQuery } from "./preview";
 
 const cssImport = /import\s+["']([^"']+\.css)["'];?/g;
 const assetImport = /import\s+([A-Za-z_$][\w$]*)\s+from\s+["']((?:\.{1,2}\/)[^"']+\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp|woff2?|ttf|otf))["'];?/gi;
@@ -20,20 +20,48 @@ function rewriteModuleAliases(source: string, path: string): string {
   });
 }
 
-export function transformPreviewModule(source: string, path: string): string {
+function rewriteLocalModuleSpecifiers(source: string, query?: string): string {
+  if (!query) return source;
+  return source.replace(/(\b(?:from|import)\s*(?:\(\s*)?)(["'])((?:\.{1,2}\/)[^"']+)\2/g, (_match, prefix, quote, specifier) => `${prefix}${quote}${withPreviewQuery(specifier, query)}${quote}`);
+}
+
+type PreviewModuleVendorContext = {
+  assetBaseUrl: string;
+  dependencies: Record<string, string>;
+};
+
+function rewriteBareModuleSpecifiers(source: string, query: string | undefined, vendor?: PreviewModuleVendorContext): string {
+  if (!query || !vendor) return source;
+  return source.replace(/(\b(?:from|import)\s*(?:\(\s*)?)(["'])([^"']+)\2/g, (match, prefix, quote, specifier: string) => {
+    if (specifier.startsWith(".") || specifier.startsWith("/") || /^[a-z]+:/i.test(specifier)) return match;
+    const dependency = Object.keys(vendor.dependencies)
+      .sort((left, right) => right.length - left.length)
+      .find((name) => specifier === name || specifier.startsWith(`${name}/`));
+    if (!dependency) return match;
+    const subpath = specifier.slice(dependency.length);
+    const target = getPreviewVendorUrl(vendor.assetBaseUrl, `${dependency}@${vendor.dependencies[dependency]}${subpath}`);
+    return `${prefix}${quote}${withPreviewQuery(target, query)}${quote}`;
+  });
+}
+
+export function transformPreviewModule(source: string, path: string, query?: string, vendor?: PreviewModuleVendorContext): string {
   const resolvedSource = rewriteModuleAliases(source, path);
   const styles = [...resolvedSource.matchAll(cssImport)].map((match) => match[1]);
   const assets = [...resolvedSource.matchAll(assetImport)].map((match) => ({ name: match[1], path: match[2] }));
   const withoutStyles = resolvedSource.replace(cssImport, "").replace(assetImport, "");
   const loader = path.endsWith(".tsx") ? ts.JsxEmit.ReactJSX : ts.JsxEmit.Preserve;
-  const transformed = ts.transpileModule(withoutStyles, { compilerOptions: { jsx: loader, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const styleLoader = styles.map((style, index) => `const previewStyle${index} = document.createElement("link"); previewStyle${index}.rel = "stylesheet"; previewStyle${index}.href = new URL(${JSON.stringify(`${style}?preview=${previewAssetVersion}`)}, import.meta.url).href; document.head.append(previewStyle${index});`).join("\n");
-  const assetLoader = assets.map(({ name, path: assetPath }) => `const ${name} = new URL(${JSON.stringify(assetPath)}, import.meta.url).href;`).join("\n");
+  const transformed = rewriteBareModuleSpecifiers(rewriteLocalModuleSpecifiers(ts.transpileModule(withoutStyles, { compilerOptions: { jsx: loader, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText, query), query, vendor);
+  const styleLoader = styles.map((style, index) => `const previewStyle${index} = document.createElement("link"); previewStyle${index}.rel = "stylesheet"; previewStyle${index}.href = new URL(${JSON.stringify(withPreviewQuery(`${style}?preview=${previewAssetVersion}`, query))}, import.meta.url).href; document.head.append(previewStyle${index});`).join("\n");
+  const assetLoader = assets.map(({ name, path: assetPath }) => `const ${name} = new URL(${JSON.stringify(withPreviewQuery(assetPath, query))}, import.meta.url).href;`).join("\n");
   return `${styleLoader}\n${assetLoader}\n${transformed}`;
 }
 
-export function transformPreviewStylesheet(source: string): string {
-  return source.replace(/@import\s+["']tailwindcss["'];?\s*/g, "");
+export function transformPreviewStylesheet(source: string, query?: string): string {
+  const withoutTailwind = source.replace(/@import\s+["']tailwindcss["'];?\s*/g, "");
+  if (!query) return withoutTailwind;
+  return withoutTailwind
+    .replace(/(@import\s+)(["'])((?:\.{1,2}\/|\/)[^"']+)\2/g, (_match, prefix, quote, url) => `${prefix}${quote}${withPreviewQuery(url, query)}${quote}`)
+    .replace(/(url\(\s*)(["']?)((?:\.{1,2}\/|\/)[^"')]+)\2(\s*\))/g, (_match, prefix, quote, url, suffix) => `${prefix}${quote}${withPreviewQuery(url, query)}${quote}${suffix}`);
 }
 
 export function extractTailwindCandidates(source: string): string[] {
@@ -42,8 +70,8 @@ export function extractTailwindCandidates(source: string): string[] {
   return [...candidates];
 }
 
-export async function compilePreviewStylesheet(source: string, candidates: string[]): Promise<string> {
+export async function compilePreviewStylesheet(source: string, candidates: string[], query?: string): Promise<string> {
   const tailwindStylesheet = await readFile(require.resolve("tailwindcss/index.css"), "utf8");
   const compiler = await compile(source.replace(tailwindPlugin, ""), { loadStylesheet: async (id) => ({ path: id, base: "", content: id === "tailwindcss" ? tailwindStylesheet : "" }) });
-  return compiler.build(candidates);
+  return transformPreviewStylesheet(compiler.build(candidates), query);
 }

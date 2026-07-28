@@ -15,19 +15,19 @@ function pinReactRuntime(path: string, runtimeVersions: RuntimeVersions): string
   return `${match[1]}@${runtimeVersions[match[1] as keyof RuntimeVersions]}${match[2] ?? ""}`;
 }
 
-function vendorSpecifier(specifier: string, vendorBaseUrl: string, runtimeVersions: RuntimeVersions): string {
+function vendorSpecifier(specifier: string, vendorBaseUrl: string, runtimeVersions: RuntimeVersions, previewQuery?: string): string {
   const upstream = specifier.replace(/^https:\/\/esm\.sh\//, "").replace(/^\//, "");
-  const [path, query] = upstream.split("?", 2);
+  const [path, upstreamQuery] = upstream.split("?", 2);
   const decodedPath = pinReactRuntime(decodeURIComponent(path), runtimeVersions);
-  return `${vendorBaseUrl}/${encodePath(decodedPath)}${query ? `?upstream=${encodeURIComponent(query)}` : ""}`;
+  return withPreviewQuery(`${vendorBaseUrl}/${encodePath(decodedPath)}${upstreamQuery ? `?upstream=${encodeURIComponent(upstreamQuery)}` : ""}`, previewQuery);
 }
 
-export function rewriteEsmModuleImports(source: string, vendorBaseUrl: string, runtimeVersions: RuntimeVersions = {}): string {
+export function rewriteEsmModuleImports(source: string, vendorBaseUrl: string, runtimeVersions: RuntimeVersions = {}, previewQuery?: string): string {
   const staticImport = /\b((?:import|export)(?:[^;"']*?\bfrom)?\s*)(["'])(\/(?!\/)[^"']+|https:\/\/esm\.sh\/[^"']+)\2/g;
   const dynamicImport = /\bimport\(\s*(["'])(\/(?!\/)[^"']+|https:\/\/esm\.sh\/[^"']+)\1\s*\)/g;
   return source
-    .replace(staticImport, (_match, prefix, quote, specifier) => `${prefix}${quote}${vendorSpecifier(specifier, vendorBaseUrl, runtimeVersions)}${quote}`)
-    .replace(dynamicImport, (_match, quote, specifier) => `import(${quote}${vendorSpecifier(specifier, vendorBaseUrl, runtimeVersions)}${quote})`);
+    .replace(staticImport, (_match, prefix, quote, specifier) => `${prefix}${quote}${vendorSpecifier(specifier, vendorBaseUrl, runtimeVersions, previewQuery)}${quote}`)
+    .replace(dynamicImport, (_match, quote, specifier) => `import(${quote}${vendorSpecifier(specifier, vendorBaseUrl, runtimeVersions, previewQuery)}${quote})`);
 }
 
 export function isSafeEsmModulePath(path: string): boolean {
@@ -37,3 +37,4 @@ export function isSafeEsmModulePath(path: string): boolean {
 export function isSafeEsmQuery(query: string): boolean {
   return !query || /^[a-zA-Z0-9._~!$&'()*+,;=:@%/-]+$/.test(query);
 }
+import { withPreviewQuery } from "./preview";
