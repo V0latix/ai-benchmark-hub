@@ -152,6 +152,43 @@ describe("CompareWorkbench", () => {
     );
   });
 
+  it("contains long comparison controls within the mobile filter panel", () => {
+    const longId = `beta-${"long-version-".repeat(12)}run`;
+    const selection = resolveComparison([
+      makeNormalizedRun("alpha", {
+        task: "gmail-clone",
+        model: "alpha"
+      }),
+      makeNormalizedRun("beta-old", {
+        task: "gmail-clone",
+        model: "beta"
+      }),
+      makeNormalizedRun(longId, {
+        task: "gmail-clone",
+        model: "beta",
+        createdAt: "2026-02-01T00:00:00Z"
+      })
+    ], { task: "gmail-clone", leftId: "alpha", rightId: longId });
+
+    render(<CompareWorkbench selection={selection} />);
+
+    const controls = screen.getAllByRole("combobox");
+    const filterGrid = screen.getByLabelText("Tâche").closest("label")?.parentElement;
+
+    expect(filterGrid).toHaveClass("min-w-0", "max-w-full");
+    expect(filterGrid?.parentElement).toHaveClass("min-w-0", "max-w-full");
+    for (const control of controls) {
+      expect(control).toHaveClass("w-full", "min-w-0", "max-w-full", "truncate");
+      expect(control.closest("label")).toHaveClass("min-w-0", "max-w-full");
+    }
+
+    for (const side of ["A", "B"]) {
+      const card = screen.getByRole("button", { name: new RegExp(`Modèle ${side}`) });
+      expect(card).toHaveClass("min-w-0");
+      expect(card.querySelectorAll(".truncate")).toHaveLength(2);
+    }
+  });
+
   it("clears incompatible run ids when the task changes", () => {
     render(<CompareWorkbench selection={readySelection} />);
 

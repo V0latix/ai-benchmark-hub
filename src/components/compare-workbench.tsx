@@ -18,6 +18,8 @@ const comparisonTabs = [
   ["code", "Code"]
 ] as const;
 type ComparisonTab = (typeof comparisonTabs)[number][0];
+const comparisonSelectClassName =
+  "min-h-11 w-full min-w-0 max-w-full truncate rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[var(--text-primary)]";
 
 function subscribeToDesktopSplit(listener: () => void) {
   const media = window.matchMedia(desktopSplitQuery);
@@ -65,10 +67,10 @@ function TaskSelector({
   onChange: (task: string) => void;
 }) {
   return (
-    <label className="grid gap-2 text-sm font-medium text-[var(--text-muted)]">
+    <label className="grid min-w-0 max-w-full gap-2 text-sm font-medium text-[var(--text-muted)]">
       <span>Tâche</span>
       <select
-        className="min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[var(--text-primary)]"
+        className={comparisonSelectClassName}
         onChange={(event) => onChange(event.target.value)}
         value={selection.task ?? ""}
       >
@@ -267,14 +269,14 @@ export function CompareWorkbench({
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
-        <div className="grid gap-4 sm:grid-cols-3">
+    <div className="min-w-0 max-w-full space-y-6">
+      <section className="min-w-0 max-w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
+        <div className="grid min-w-0 max-w-full gap-4 sm:grid-cols-3">
           <TaskSelector selection={selection} onChange={(task) => replaceSelection(task)} />
-          <label className="grid gap-2 text-sm font-medium text-[var(--text-muted)]">
+          <label className="grid min-w-0 max-w-full gap-2 text-sm font-medium text-[var(--text-muted)]">
             <span>Modèle A</span>
             <select
-              className="min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[var(--text-primary)]"
+              className={comparisonSelectClassName}
               onChange={(event) => changeModel("left", event.target.value)}
               value={left.model ?? ""}
             >
@@ -283,10 +285,10 @@ export function CompareWorkbench({
               .map(({ model }) => <option key={model} value={model}>{model}</option>)}
             </select>
           </label>
-          <label className="grid gap-2 text-sm font-medium text-[var(--text-muted)]">
+          <label className="grid min-w-0 max-w-full gap-2 text-sm font-medium text-[var(--text-muted)]">
             <span>Modèle B</span>
             <select
-              className="min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[var(--text-primary)]"
+              className={comparisonSelectClassName}
               onChange={(event) => changeModel("right", event.target.value)}
               value={right.model ?? ""}
             >
@@ -296,10 +298,10 @@ export function CompareWorkbench({
             </select>
           </label>
           {leftModel && leftModel.runs.length > 1 && (
-            <label className="grid gap-2 text-sm font-medium text-[var(--text-muted)]">
+            <label className="grid min-w-0 max-w-full gap-2 text-sm font-medium text-[var(--text-muted)]">
               <span>Version du run A</span>
               <select
-                className="min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[var(--text-primary)]"
+                className={comparisonSelectClassName}
                 onChange={(event) => {
                   if (!selection.task) return;
                   const path = comparisonPath(selection.task, event.target.value, right.id);
@@ -312,10 +314,10 @@ export function CompareWorkbench({
             </label>
           )}
           {rightModel && rightModel.runs.length > 1 && (
-            <label className="grid gap-2 text-sm font-medium text-[var(--text-muted)]">
+            <label className="grid min-w-0 max-w-full gap-2 text-sm font-medium text-[var(--text-muted)]">
               <span>Version du run B</span>
               <select
-                className="min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[var(--text-primary)]"
+                className={comparisonSelectClassName}
                 onChange={(event) => {
                   if (!selection.task) return;
                   const path = comparisonPath(selection.task, left.id, event.target.value);
