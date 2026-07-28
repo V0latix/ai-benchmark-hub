@@ -134,12 +134,26 @@ describe("GitHubBenchmarkWriter", () => {
   });
 
   it("classifies a rejected fast-forward update as a retryable conflict without forcing", async () => {
-    const github = fakeGitHub([response({ message: "Reference update failed" }, 422)]);
+    const github = fakeGitHub([response({ message: "Update is not a fast forward" }, 422)]);
     const writer = new GitHubBenchmarkWriter("test-token", github.fetcher as typeof fetch);
 
     await expect(writer.updateBranch("main", "next-commit"))
       .rejects.toBeInstanceOf(GitBranchConflictError);
     expect(body(github.calls[0]!)).toEqual({ sha: "next-commit", force: false });
+  });
+
+  it("keeps a generic 422 validation response non-retryable and its body private", async () => {
+    const github = fakeGitHub([response({
+      message: "Validation Failed: private upstream detail",
+      errors: [{ code: "custom", message: "secret validation context" }]
+    }, 422)]);
+    const writer = new GitHubBenchmarkWriter("test-token", github.fetcher as typeof fetch);
+
+    const failure = writer.updateBranch("main", "next-commit");
+    await expect(failure).rejects.toThrow("GitHub request failed (422)");
+    await expect(failure).rejects.not.toBeInstanceOf(GitBranchConflictError);
+    await expect(failure).rejects.not.toThrow(/private upstream detail|secret validation context/);
+    expect(github.calls).toHaveLength(1);
   });
 
   it("rejects every malformed recursive tree entry instead of silently omitting it", async () => {

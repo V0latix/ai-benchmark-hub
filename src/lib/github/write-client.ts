@@ -29,6 +29,7 @@ const OWNER = "Melvynx";
 const REPOSITORY = "benchmarks";
 const API_ROOT = `https://api.github.com/repos/${OWNER}/${REPOSITORY}`;
 const API_VERSION = "2026-03-10";
+const MAX_ERROR_BODY_BYTES = 16_384;
 const importBranch = /^imports\/[a-z0-9-]{20,}$/;
 const commitSha = /^[a-f0-9]{40}$/i;
 
@@ -87,6 +88,47 @@ function decodeBase64(content: string): string {
     throw new Error("GitHub response was invalid");
   }
   return Buffer.from(normalized, "base64").toString("utf8");
+}
+
+async function readBoundedErrorMessage(response: Response): Promise<string | null> {
+  const declaredLength = response.headers.get("content-length");
+  if (
+    declaredLength
+    && (!/^(?:0|[1-9][0-9]*)$/.test(declaredLength) || Number(declaredLength) > MAX_ERROR_BODY_BYTES)
+  ) {
+    return null;
+  }
+  if (!response.body) return null;
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_ERROR_BODY_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const message = (parsed as Record<string, unknown>).message;
+    return typeof message === "string" && message.length <= 512 ? message : null;
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /** Server-side transport fixed to the benchmark repository. */
@@ -162,7 +204,14 @@ export class GitHubBenchmarkWriter implements BenchmarkGitWriter {
       method: "PATCH",
       body: JSON.stringify({ sha: commitSha, force: false })
     }, [422]);
-    if (response.status === 422) throw new GitBranchConflictError();
+    if (response.status === 422) {
+      const message = await readBoundedErrorMessage(response);
+      if (message?.trim().toLocaleLowerCase("en-US") === "update is not a fast forward") {
+        throw new GitBranchConflictError();
+      }
+      throw new Error("GitHub request failed (422)");
+    }
+    if (!response.ok) throw new Error(`GitHub request failed (${response.status})`);
   }
 
   async deleteBranch(branch: string): Promise<void> {

@@ -358,6 +358,28 @@ describe("atomic import publication", () => {
     expect(writer.refs.has(branch)).toBe(true);
   });
 
+  it("does not retry a generic GitHub validation failure", async () => {
+    class ValidationFailureWriter extends InMemoryGitWriter {
+      override async updateBranch(branch: string, commitSha: string, force = false): Promise<void> {
+        if (force) throw new Error("Forced updates are forbidden");
+        this.updateAttempts.push({ branch, commitSha, force: false });
+        throw new Error("GitHub request failed (422)");
+      }
+    }
+    const writer = new ValidationFailureWriter();
+    const draftToken = await seedDraft(writer);
+
+    await expect(publishDraft({
+      draftId: DRAFT_ID,
+      draftToken,
+      secret: SECRET,
+      now: NOW
+    }, writer)).rejects.toThrow("GitHub request failed (422)");
+
+    expect(writer.mainUpdateAttempts).toBe(1);
+    expect(writer.refs.get("main")).toBe("main-commit");
+  });
+
   it("reports cleanup failure after publication and rejects every token replay", async () => {
     class CleanupFailureWriter extends InMemoryGitWriter {
       override async deleteBranch(): Promise<void> {
@@ -461,6 +483,43 @@ describe("publish and cancel routes", () => {
       "/",
       `/tasks/${encodeURIComponent(TASK)}`,
       `/runs/${encodeURIComponent(`melvynx-benchmarks-${RUN_ID}`)}`
+    ]);
+  });
+
+  it("keeps a truthful success response when post-publication invalidation fails", async () => {
+    const writer = new InMemoryGitWriter();
+    const draftToken = await seedDraft(writer);
+    const invalidationAttempts: string[] = [];
+    const POST = createPublishImportHandler({
+      readEnvironment: () => environment,
+      createWriter: () => writer,
+      now: () => NOW,
+      revalidateTag: (tag) => {
+        invalidationAttempts.push(`tag:${tag}`);
+        throw new Error("cache backend unavailable");
+      },
+      revalidatePath: (path) => {
+        invalidationAttempts.push(`path:${path}`);
+        throw new Error("cache backend unavailable");
+      }
+    });
+
+    const response = await POST(tokenRequest("POST", draftToken), {
+      params: Promise.resolve({ draftId: DRAFT_ID })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.runUrl).toBe(`/runs/${encodeURIComponent(`melvynx-benchmarks-${RUN_ID}`)}`);
+    expect(body.invalidationWarning).toMatch(/cache|invalidate/i);
+    expect(body.error).toBeUndefined();
+    expect(writer.refs.get("main")).not.toBe("main-commit");
+    expect(writer.mainUpdateAttempts).toBe(1);
+    expect(invalidationAttempts).toEqual([
+      "tag:melvynx-imports",
+      "path:/",
+      `path:/tasks/${encodeURIComponent(TASK)}`,
+      `path:/runs/${encodeURIComponent(`melvynx-benchmarks-${RUN_ID}`)}`
     ]);
   });
 

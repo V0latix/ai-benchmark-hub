@@ -76,29 +76,37 @@ export function createPublishImportHandler(
     const draftToken = await readDraftToken(request);
     if (!draftToken) return json({ error: "Publication invalide" }, 400);
 
+    const { draftId } = await context.params;
+    let result;
     try {
-      const { draftId } = await context.params;
-      const result = await publishDraft({
+      result = await publishDraft({
         draftId,
         draftToken,
         secret: environment.sessionSecret,
         now: dependencies.now()
       }, dependencies.createWriter(environment));
-      const runUrl = `/runs/${encodeURIComponent(result.run.id)}`;
-      const taskUrl = `/tasks/${encodeURIComponent(result.run.task!)}`;
-      dependencies.revalidateTag("melvynx-imports", { expire: 0 });
-      dependencies.revalidatePath("/");
-      dependencies.revalidatePath(taskUrl);
-      dependencies.revalidatePath(runUrl);
-      return json({
-        run: result.run,
-        runUrl,
-        taskUrl,
-        cleanupWarning: result.cleanupWarning
-      });
     } catch {
       return json({ error: "Publication impossible; le brouillon reste disponible" }, 409);
     }
+
+    const runUrl = `/runs/${encodeURIComponent(result.run.id)}`;
+    const taskUrl = `/tasks/${encodeURIComponent(result.run.task!)}`;
+    const invalidations = await Promise.allSettled([
+      Promise.resolve().then(() => dependencies.revalidateTag("melvynx-imports", { expire: 0 })),
+      Promise.resolve().then(() => dependencies.revalidatePath("/")),
+      Promise.resolve().then(() => dependencies.revalidatePath(taskUrl)),
+      Promise.resolve().then(() => dependencies.revalidatePath(runUrl))
+    ]);
+    const invalidationWarning = invalidations.some((invalidation) => invalidation.status === "rejected")
+      ? "Published run, but one or more caches could not be invalidated"
+      : null;
+    return json({
+      run: result.run,
+      runUrl,
+      taskUrl,
+      cleanupWarning: result.cleanupWarning,
+      invalidationWarning
+    });
   };
 }
 
