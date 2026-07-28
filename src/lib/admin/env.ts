@@ -14,6 +14,13 @@ export function readAdminEnvironment(env: ServerEnvironment = process.env): Admi
   const missing = requiredVariables.filter((name) => !env[name]?.trim());
   if (missing.length) throw new Error(`Missing server environment variables: ${missing.join(", ")}`);
 
+  const invalid = requiredVariables.filter((name) => {
+    const value = env[name]!;
+    return value.includes("INVALID_")
+      || (name === "ADMIN_SESSION_SECRET" && Buffer.byteLength(value, "utf8") < 32);
+  });
+  if (invalid.length) throw new Error(`Invalid server environment variables: ${invalid.join(", ")}`);
+
   return {
     passwordHash: env.ADMIN_PASSWORD_HASH!,
     sessionSecret: env.ADMIN_SESSION_SECRET!,

@@ -28,7 +28,7 @@ describe("admin session route", () => {
   beforeEach(async () => {
     testIp += 1;
     vi.stubEnv("ADMIN_PASSWORD_HASH", await hashAdminPassword("correct horse", Buffer.alloc(16, 7)));
-    vi.stubEnv("ADMIN_SESSION_SECRET", "session-secret");
+    vi.stubEnv("ADMIN_SESSION_SECRET", "session-secret-with-at-least-32-bytes");
     vi.stubEnv("BENCHMARK_GITHUB_TOKEN", "github-token");
     vi.stubEnv("NODE_ENV", "production");
   });

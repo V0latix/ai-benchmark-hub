@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAdminSession } from "../../src/lib/admin/auth";
 
+const SESSION_SECRET = "session-secret-with-at-least-32-bytes";
 const cookieStore = vi.hoisted(() => ({
   get: vi.fn()
 }));
@@ -21,7 +22,7 @@ async function renderPage() {
 describe("admin import page", () => {
   beforeEach(() => {
     vi.stubEnv("ADMIN_PASSWORD_HASH", "scrypt$hash$hash");
-    vi.stubEnv("ADMIN_SESSION_SECRET", "session-secret");
+    vi.stubEnv("ADMIN_SESSION_SECRET", SESSION_SECRET);
     vi.stubEnv("BENCHMARK_GITHUB_TOKEN", "github-token");
     cookieStore.get.mockReturnValue(undefined);
   });
@@ -42,7 +43,7 @@ describe("admin import page", () => {
   });
 
   it("rejects a tampered session and keeps the import shell private", async () => {
-    cookieStore.get.mockReturnValue({ value: `${createAdminSession("session-secret", { csrf: "csrf" })}x` });
+    cookieStore.get.mockReturnValue({ value: `${createAdminSession(SESSION_SECRET, { csrf: "csrf" })}x` });
 
     await renderPage();
 
@@ -51,7 +52,7 @@ describe("admin import page", () => {
   });
 
   it("renders the existing task catalog only for a verified server-side session", async () => {
-    cookieStore.get.mockReturnValue({ value: createAdminSession("session-secret", { csrf: "csrf" }) });
+    cookieStore.get.mockReturnValue({ value: createAdminSession(SESSION_SECRET, { csrf: "csrf" }) });
 
     await renderPage();
 

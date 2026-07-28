@@ -7,7 +7,7 @@ import { signDraftToken } from "../../src/lib/imports/receipts";
 
 const draftId = "4f3a2d1c4b5e6f708192a3b4c5d6e7f8";
 const commitSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const secret = "preview-test-secret";
+const secret = "preview-test-secret-with-32-bytes";
 
 function queryCount(url: string, name: string): number {
   return new URL(url, "https://hub.example").searchParams.getAll(name).length;
