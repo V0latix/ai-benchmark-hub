@@ -1,6 +1,9 @@
 "use client";
 
 import { AlertTriangle, CheckCircle2, Eye } from "lucide-react";
+import { useEffect, useRef } from "react";
+
+import { adminPreviewMessageType } from "../lib/visuals/preview";
 
 type ImportPreviewProps = {
   error: boolean;
@@ -12,8 +15,10 @@ type ImportPreviewProps = {
     createdAt: string;
     notes: string;
   };
+  nonce: string;
   onError: () => void;
-  onLoad: () => void;
+  onFrameLoad: () => void;
+  onReady: () => void;
   previewUrl: string;
 };
 
@@ -21,10 +26,46 @@ export function ImportPreview({
   error,
   loaded,
   metadata,
+  nonce,
   onError,
-  onLoad,
+  onFrameLoad,
+  onReady,
   previewUrl
 }: ImportPreviewProps) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const frameLoaded = useRef(false);
+  const onErrorRef = useRef(onError);
+  const onReadyRef = useRef(onReady);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+    onReadyRef.current = onReady;
+  }, [onError, onReady]);
+
+  useEffect(() => {
+    frameLoaded.current = false;
+    function receiveReadiness(event: MessageEvent) {
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      if (!event.data || typeof event.data !== "object" || Array.isArray(event.data)) return;
+      const message = event.data as Record<string, unknown>;
+      if (
+        Object.keys(message).sort().join(",") !== "nonce,state,type"
+        || message.type !== adminPreviewMessageType
+        || message.nonce !== nonce
+        || (message.state !== "ready" && message.state !== "error")
+      ) {
+        return;
+      }
+      if (message.state === "error") {
+        onErrorRef.current();
+      } else if (frameLoaded.current) {
+        onReadyRef.current();
+      }
+    }
+    window.addEventListener("message", receiveReadiness);
+    return () => window.removeEventListener("message", receiveReadiness);
+  }, [nonce, previewUrl]);
+
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--canvas)]">
@@ -48,7 +89,11 @@ export function ImportPreview({
         <iframe
           className="block h-[32rem] w-full bg-white"
           onErrorCapture={onError}
-          onLoad={onLoad}
+          onLoad={() => {
+            frameLoaded.current = true;
+            onFrameLoad();
+          }}
+          ref={iframeRef}
           sandbox="allow-scripts"
           src={previewUrl}
           title="Prévisualisation du run importé"

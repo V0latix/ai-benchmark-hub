@@ -50,13 +50,18 @@ export type DraftTokenPayload = {
 export type PreviewTokenPayload = {
   version: 1;
   draftId: string;
+  branch: string;
   commitSha: string;
   task: string;
   appSlug: string;
+  nonce: string;
   expiresAt: number;
 };
 
-export type PreviewTokenBinding = Pick<PreviewTokenPayload, "draftId" | "commitSha" | "task" | "appSlug">;
+export type PreviewTokenBinding = Pick<
+  PreviewTokenPayload,
+  "draftId" | "branch" | "commitSha" | "task" | "appSlug" | "nonce"
+>;
 
 function hasExactKeys(value: object, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
@@ -132,16 +137,21 @@ function isDraftTokenPayload(value: unknown): value is DraftTokenPayload {
 function isPreviewTokenPayload(value: unknown): value is PreviewTokenPayload {
   if (!value || typeof value !== "object") return false;
   const payload = value as Partial<PreviewTokenPayload>;
-  return hasExactKeys(value, ["version", "draftId", "commitSha", "task", "appSlug", "expiresAt"])
+  return hasExactKeys(value, ["version", "draftId", "branch", "commitSha", "task", "appSlug", "nonce", "expiresAt"])
     && payload.version === 1
     && typeof payload.draftId === "string"
     && draftIdPattern.test(payload.draftId)
+    && typeof payload.branch === "string"
+    && branchPattern.test(payload.branch)
+    && payload.branch.endsWith(`-${payload.draftId}`)
     && typeof payload.commitSha === "string"
     && gitShaPattern.test(payload.commitSha)
     && typeof payload.task === "string"
     && slugPattern.test(payload.task)
     && typeof payload.appSlug === "string"
     && slugPattern.test(payload.appSlug)
+    && typeof payload.nonce === "string"
+    && /^[a-f0-9]{32,}$/.test(payload.nonce)
     && isSafeExpiry(payload.expiresAt);
 }
 
@@ -178,9 +188,11 @@ function canonicalPreviewToken(payload: PreviewTokenPayload): PreviewTokenPayloa
   return {
     version: 1,
     draftId: payload.draftId,
+    branch: payload.branch,
     commitSha: payload.commitSha,
     task: payload.task,
     appSlug: payload.appSlug,
+    nonce: payload.nonce,
     expiresAt: payload.expiresAt
   };
 }
@@ -230,6 +242,11 @@ function verify<T>(
 
 export function createDraftId(random: Uint8Array = randomBytes(16)): string {
   if (random.byteLength < 16) throw new Error("Draft IDs require at least 128 random bits");
+  return Buffer.from(random).toString("hex");
+}
+
+export function createPreviewNonce(random: Uint8Array = randomBytes(16)): string {
+  if (random.byteLength < 16) throw new Error("Preview nonces require at least 128 random bits");
   return Buffer.from(random).toString("hex");
 }
 
@@ -287,15 +304,23 @@ export function verifyPreviewToken(
   const payload = verify(token, PURPOSE.preview, secret, isPreviewTokenPayload);
   return payload
     && payload.draftId === expected.draftId
+    && payload.branch === expected.branch
     && payload.commitSha === expected.commitSha
     && payload.task === expected.task
     && payload.appSlug === expected.appSlug
+    && payload.nonce === expected.nonce
     && payload.expiresAt > now
+    && payload.expiresAt <= now + PREVIEW_TOKEN_TTL_MS
     ? payload
     : null;
 }
 
 export function verifyPreviewTokenForDraft(token: string, secret: string, draftId: string, now = Date.now()): PreviewTokenPayload | null {
   const payload = verify(token, PURPOSE.preview, secret, isPreviewTokenPayload);
-  return payload && payload.draftId === draftId && payload.expiresAt > now ? payload : null;
+  return payload
+    && payload.draftId === draftId
+    && payload.expiresAt > now
+    && payload.expiresAt <= now + PREVIEW_TOKEN_TTL_MS
+    ? payload
+    : null;
 }

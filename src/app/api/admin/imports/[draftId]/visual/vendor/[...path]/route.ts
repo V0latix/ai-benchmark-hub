@@ -1,5 +1,6 @@
 import { readAdminEnvironment } from "../../../../../../../../lib/admin/env";
-import { verifyPreviewTokenForDraft } from "../../../../../../../../lib/imports/receipts";
+import { GitHubBenchmarkWriter } from "../../../../../../../../lib/github/write-client";
+import { verifyLiveDraftPreview } from "../../../../../../../../lib/visuals/draft-preview-auth";
 import { resolveVerifiedDraftPreviewContext } from "../../../../../../../../lib/visuals/preview-context";
 import { interactivePreviewCorsHeaders, previewAssetVersion } from "../../../../../../../../lib/visuals/preview";
 import { getPreviewRuntimeVersions } from "../../../../../../../../lib/visuals/runtime";
@@ -13,7 +14,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ draf
   const capabilities = url.searchParams.getAll("preview");
   const versions = url.searchParams.getAll("v");
   if (capabilities.length !== 1 || versions.length > 1 || (versions[0] && versions[0] !== previewAssetVersion)) return new Response("Module not available", { status: 404 });
-  const preview = verifyPreviewTokenForDraft(capabilities[0], readAdminEnvironment().sessionSecret, draftId);
+  const environment = readAdminEnvironment();
+  const preview = await verifyLiveDraftPreview(
+    capabilities[0],
+    environment.sessionSecret,
+    draftId,
+    new GitHubBenchmarkWriter(environment.githubToken)
+  );
   if (!preview || !isSafeEsmModulePath(modulePath) || !isSafeEsmQuery(upstream)) return new Response("Module not available", { status: 404 });
   try {
     const context = resolveVerifiedDraftPreviewContext(preview);
@@ -23,6 +30,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ draf
     const vendorBase = `/api/admin/imports/${encodeURIComponent(draftId)}/visual/vendor`;
     const previewQuery = new URLSearchParams({ ...(versions[0] ? { v: versions[0] } : {}), preview: capabilities[0] }).toString();
     const body = rewriteEsmModuleImports(await response.text(), vendorBase, runtimeVersions, previewQuery);
-    return new Response(body, { headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } });
-  } catch { return new Response("Module not available", { status: 502 }); }
+    return new Response(body, { headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } });
+  } catch { return new Response("Module not available", { status: 404 }); }
 }

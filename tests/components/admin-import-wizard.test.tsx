@@ -5,9 +5,12 @@ import { strToU8, zipSync } from "fflate";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AdminImportWizard } from "../../src/components/admin-import-wizard";
+import { adminPreviewMessageType } from "../../src/lib/visuals/preview";
 
 const csrf = "csrf-value";
 const tasks = ["figma-clone", "gmail-clone"];
+const previewNonce = "cd".repeat(16);
+const previewUrl = "/api/admin/imports/draft-1/visual?preview=preview-token";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -52,10 +55,11 @@ function successfulFetch(options: {
     if (url === "/api/admin/imports/finalize") {
       return jsonResponse({
         draftToken: "draft-token",
-        previewUrl: "/api/admin/imports/draft-1/visual?token=preview-token"
+        previewUrl,
+        previewNonce
       });
     }
-    if (url === "/api/admin/imports/draft-1/visual?token=preview-token" && init?.method === "GET") {
+    if (url === previewUrl && init?.method === "GET") {
       const status = options.previewStatus ?? 200;
       return new Response(status >= 200 && status < 300 ? "<html></html>" : "Preview not available", {
         status,
@@ -85,6 +89,23 @@ function successfulFetch(options: {
   });
 }
 
+function postPreviewMessage(
+  iframe: HTMLIFrameElement,
+  state: "ready" | "error",
+  nonce = previewNonce,
+  source: MessageEventSource | null = iframe.contentWindow
+) {
+  fireEvent(window, new MessageEvent("message", {
+    data: { type: adminPreviewMessageType, state, nonce },
+    source
+  }));
+}
+
+function markPreviewReady(iframe: HTMLIFrameElement) {
+  fireEvent.load(iframe);
+  postPreviewMessage(iframe, "ready");
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -106,7 +127,7 @@ describe("AdminImportWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
     const preview = await screen.findByTitle("Prévisualisation du run importé");
     expect(fetch).toHaveBeenCalledWith(
-      "/api/admin/imports/draft-1/visual?token=preview-token",
+      previewUrl,
       expect.objectContaining({
         cache: "no-store",
         credentials: "same-origin",
@@ -117,6 +138,11 @@ describe("AdminImportWizard", () => {
     expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
 
     fireEvent.load(preview);
+    expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
+    postPreviewMessage(preview as HTMLIFrameElement, "ready", "ef".repeat(16));
+    postPreviewMessage(preview as HTMLIFrameElement, "ready", previewNonce, window);
+    expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
+    postPreviewMessage(preview as HTMLIFrameElement, "ready");
     expect(screen.getByText("Aperçu chargé")).toHaveAttribute("role", "status");
     expect(screen.getByRole("button", { name: "Publier le run" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Publier le run" }));
@@ -191,10 +217,11 @@ describe("AdminImportWizard", () => {
       if (url === "/api/admin/imports/finalize") {
         return Promise.resolve(jsonResponse({
           draftToken: "draft-token",
-          previewUrl: "/api/admin/imports/draft-1/visual?token=preview-token"
+          previewUrl,
+          previewNonce
         }));
       }
-      if (url === "/api/admin/imports/draft-1/visual?token=preview-token") {
+      if (url === previewUrl) {
         return Promise.resolve(new Response("<html></html>", {
           status: 200,
           headers: { "content-type": "text/html" }
@@ -252,10 +279,11 @@ describe("AdminImportWizard", () => {
       if (url === "/api/admin/imports/finalize") {
         return jsonResponse({
           draftToken: "draft-token",
-          previewUrl: "/api/admin/imports/draft-1/visual?token=preview-token"
+          previewUrl,
+          previewNonce
         });
       }
-      if (url === "/api/admin/imports/draft-1/visual?token=preview-token") {
+      if (url === previewUrl) {
         return new Response("<html></html>", {
           status: 200,
           headers: { "content-type": "text/html" }
@@ -324,6 +352,21 @@ describe("AdminImportWizard", () => {
     expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
   });
 
+  it("keeps publish unavailable after an authenticated runtime failure even if a late ready arrives", async () => {
+    vi.stubGlobal("fetch", successfulFetch());
+    render(<AdminImportWizard csrf={csrf} tasks={tasks} />);
+
+    await identifyRun();
+    fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
+    const preview = await screen.findByTitle("Prévisualisation du run importé") as HTMLIFrameElement;
+    fireEvent.load(preview);
+    postPreviewMessage(preview, "error");
+    postPreviewMessage(preview, "ready");
+
+    expect(await screen.findByText(/prévisualisation n’a pas pu être chargée/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publier le run" })).toBeDisabled();
+  });
+
   it("retains the same draft token when publication fails and succeeds on retry", async () => {
     const fetcher = successfulFetch({ publishFailures: 1 });
     vi.stubGlobal("fetch", fetcher);
@@ -332,7 +375,7 @@ describe("AdminImportWizard", () => {
     await identifyRun();
     fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
     const preview = await screen.findByTitle("Prévisualisation du run importé");
-    fireEvent.load(preview);
+    markPreviewReady(preview as HTMLIFrameElement);
     fireEvent.click(screen.getByRole("button", { name: "Publier le run" }));
 
     expect(await screen.findByText(/le brouillon reste disponible/i)).toBeInTheDocument();
@@ -456,7 +499,7 @@ describe("AdminImportWizard", () => {
     await identifyRun();
     fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
     const preview = await screen.findByTitle("Prévisualisation du run importé");
-    fireEvent.load(preview);
+    markPreviewReady(preview as HTMLIFrameElement);
     fireEvent.click(screen.getByRole("button", { name: "Publier le run" }));
     await waitFor(() => expect(resolvePublish).toBeTypeOf("function"));
     fireEvent.click(screen.getByRole("button", { name: "Se déconnecter" }));

@@ -10,7 +10,8 @@ import {
   signFileReceipt,
   signUploadToken,
   verifyDraftToken,
-  verifyFileReceipt
+  verifyFileReceipt,
+  verifyPreviewToken
 } from "../../src/lib/imports/receipts";
 import { InMemoryGitWriter } from "../fixtures/in-memory-git-writer";
 
@@ -266,11 +267,24 @@ describe("admin import routes", () => {
     const body = JSON.parse(text);
 
     expect(response.status).toBe(200);
-    expect(Object.keys(body).sort()).toEqual(["draftToken", "previewUrl"]);
-    expect(verifyDraftToken(body.draftToken, SECRET, DRAFT_ID, NOW)).toMatchObject({
+    expect(Object.keys(body).sort()).toEqual(["draftToken", "previewNonce", "previewUrl"]);
+    const draft = verifyDraftToken(body.draftToken, SECRET, DRAFT_ID, NOW);
+    expect(draft).toMatchObject({
       task: "gmail-clone",
       appSlug: "2026-07-26-lmarena-model-a"
     });
+    expect(body.previewNonce).toMatch(/^[a-f0-9]{32,}$/);
+    const previewUrl = new URL(body.previewUrl, "https://hub.example");
+    expect([...previewUrl.searchParams.keys()]).toEqual(["preview"]);
+    expect(verifyPreviewToken(previewUrl.searchParams.get("preview")!, SECRET, {
+      draftId: DRAFT_ID,
+      branch: draft!.branch,
+      commitSha: draft!.commitSha,
+      task: draft!.task,
+      appSlug: draft!.appSlug,
+      nonce: body.previewNonce
+    }, NOW)).not.toBeNull();
+    expect(body.previewUrl).not.toContain(body.draftToken);
     expect(text).not.toContain(SECRET);
     expect(text).not.toContain(env.githubToken);
   });

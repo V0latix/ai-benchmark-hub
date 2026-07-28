@@ -46,6 +46,7 @@ type FinalizedDraft = {
   draftId: string;
   draftToken: string;
   previewUrl: string;
+  previewNonce: string;
   metadata: DraftMetadata;
 };
 
@@ -117,6 +118,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
   const taskId = useId();
   const inspectionSequence = useRef(0);
   const operationSequence = useRef(0);
+  const previewRuntimeFailed = useRef(false);
 
   const canonicalTasks = [...new Set(tasks)].sort((left, right) => left.localeCompare(right, "fr"));
   const [phase, setPhase] = useState<WizardPhase>("identify");
@@ -133,6 +135,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
   const [uploadSession, setUploadSession] = useState<UploadSession | null>(null);
   const [draft, setDraft] = useState<FinalizedDraft | null>(null);
   const [previewAvailable, setPreviewAvailable] = useState(false);
+  const [previewFrameLoaded, setPreviewFrameLoaded] = useState(false);
   const [previewLoaded, setPreviewLoaded] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [publishFailed, setPublishFailed] = useState(false);
@@ -149,8 +152,10 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
     setDraft(null);
     setProgress({ complete: 0, total: 0 });
     setPreviewAvailable(false);
+    setPreviewFrameLoaded(false);
     setPreviewLoaded(false);
     setPreviewFailed(false);
+    previewRuntimeFailed.current = false;
     setPublishFailed(false);
   }
 
@@ -182,8 +187,10 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
     setUploadSession(null);
     setDraft(null);
     setPublished(null);
+    setPreviewFrameLoaded(false);
     setPreviewLoaded(false);
     setPreviewFailed(false);
+    previewRuntimeFailed.current = false;
     setPublishFailed(false);
     setNotice(null);
     setError(null);
@@ -393,8 +400,18 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
     });
     if (operationSequence.current !== operation) return;
     if (response.status === 401) throw new SessionExpiredError();
-    const payload = await readJson<{ draftToken?: string; previewUrl?: string } & ErrorPayload>(response);
-    if (!response.ok || !payload.draftToken || !payload.previewUrl) {
+    const payload = await readJson<{
+      draftToken?: string;
+      previewUrl?: string;
+      previewNonce?: string;
+    } & ErrorPayload>(response);
+    if (
+      !response.ok
+      || !payload.draftToken
+      || !payload.previewUrl
+      || !payload.previewNonce
+      || !/^[a-f0-9]{32,}$/.test(payload.previewNonce)
+    ) {
       throw new Error(safeError(payload, "Finalisation du brouillon impossible."));
     }
 
@@ -402,11 +419,14 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
       draftId: session.draftId,
       draftToken: payload.draftToken,
       previewUrl: payload.previewUrl,
+      previewNonce: payload.previewNonce,
       metadata: session.metadata
     });
     setPreviewAvailable(false);
+    setPreviewFrameLoaded(false);
     setPreviewLoaded(false);
     setPreviewFailed(false);
+    previewRuntimeFailed.current = false;
     setPhase("preview");
 
     try {
@@ -415,7 +435,8 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
       if (
         previewUrl.origin !== window.location.origin
         || previewUrl.pathname !== expectedPath
-        || !previewUrl.searchParams.get("token")
+        || previewUrl.searchParams.getAll("preview").length !== 1
+        || [...previewUrl.searchParams.keys()].some((key) => key !== "preview")
       ) {
         throw new Error("Unsafe preview URL");
       }
@@ -431,14 +452,16 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
     } catch {
       if (operationSequence.current !== operation) return;
       setPreviewAvailable(false);
+      setPreviewFrameLoaded(false);
       setPreviewLoaded(false);
       setPreviewFailed(true);
+      previewRuntimeFailed.current = true;
       setError("La prévisualisation sécurisée est indisponible. Le brouillon reste disponible.");
     }
   }
 
   async function publishDraft() {
-    if (!draft || !previewAvailable || !previewLoaded) return;
+    if (!draft || !previewAvailable || !previewFrameLoaded || !previewLoaded) return;
     const operation = operationSequence.current + 1;
     operationSequence.current = operation;
     setError(null);
@@ -802,15 +825,23 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
                   error={previewFailed}
                   loaded={previewLoaded}
                   metadata={draft.metadata}
+                  nonce={draft.previewNonce}
                   onError={() => {
+                    previewRuntimeFailed.current = true;
+                    setPreviewFrameLoaded(false);
                     setPreviewLoaded(false);
                     setPreviewFailed(true);
                     setError("La prévisualisation n’a pas pu être chargée. Le brouillon reste disponible.");
                   }}
-                  onLoad={() => {
-                    setPreviewFailed(false);
-                    setPreviewLoaded(true);
-                    setError(null);
+                  onFrameLoad={() => {
+                    if (!previewRuntimeFailed.current) setPreviewFrameLoaded(true);
+                  }}
+                  onReady={() => {
+                    if (!previewRuntimeFailed.current) {
+                      setPreviewFailed(false);
+                      setPreviewLoaded(true);
+                      setError(null);
+                    }
                   }}
                   previewUrl={draft.previewUrl}
                 />
@@ -843,7 +874,7 @@ export function AdminImportWizard({ csrf, tasks }: { csrf: string; tasks: readon
                 </button>
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-5 py-3 font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={!previewAvailable || !previewLoaded || previewFailed || phase === "publishing"}
+                  disabled={!previewAvailable || !previewFrameLoaded || !previewLoaded || previewFailed || phase === "publishing"}
                   onClick={publishDraft}
                   type="button"
                 >

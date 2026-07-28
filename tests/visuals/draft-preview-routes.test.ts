@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET as getDraftVisual } from "../../src/app/api/admin/imports/[draftId]/visual/route";
 import { GET as getDraftAsset } from "../../src/app/api/admin/imports/[draftId]/visual/asset/[...path]/route";
 import { GET as getDraftVendor } from "../../src/app/api/admin/imports/[draftId]/visual/vendor/[...path]/route";
-import { signDraftToken } from "../../src/lib/imports/receipts";
+import { signPreviewToken } from "../../src/lib/imports/receipts";
 
 const draftId = "4f3a2d1c4b5e6f708192a3b4c5d6e7f8";
 const commitSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const secret = "preview-test-secret-with-32-bytes";
+const branch = `imports/1785072000-${draftId}`;
+const nonce = "cd".repeat(16);
 
 function queryCount(url: string, name: string): number {
   return new URL(url, "https://hub.example").searchParams.getAll(name).length;
@@ -27,6 +29,12 @@ function draftVendorPath(url: URL): string[] {
   return url.pathname.split("/visual/vendor/")[1].split("/").map(decodeURIComponent);
 }
 
+function expectPrivateSubresourceHeaders(response: Response) {
+  expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+  expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(response.headers.get("cache-control")).toBe("no-store");
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -38,6 +46,7 @@ describe("draft preview route graph", () => {
     vi.stubEnv("ADMIN_SESSION_SECRET", secret);
     vi.stubEnv("BENCHMARK_GITHUB_TOKEN", "unused-test-token");
 
+    let branchHead: string | null = commitSha;
     const files = new Map([
       ["index.html", '<html><body><img src="/hero.png"><script type="module" src="/src/main.tsx"></script></body></html>'],
       ["package.json", JSON.stringify({ dependencies: { react: "^19.2.0", "react-dom": "^19.2.0" } })],
@@ -52,6 +61,14 @@ describe("draft preview route graph", () => {
     ]);
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
+      if (url.includes("/repos/Melvynx/benchmarks/git/ref/heads/imports/")) {
+        return branchHead
+          ? Response.json({ object: { sha: branchHead } })
+          : new Response("missing", { status: 404 });
+      }
+      if (url.includes(`/repos/Melvynx/benchmarks/git/commits/${commitSha}`)) {
+        return Response.json({ tree: { sha: "b".repeat(40) }, parents: [{ sha: "c".repeat(40) }] });
+      }
       if (url.startsWith("https://raw.githubusercontent.com/")) {
         const marker = `/Melvynx/benchmarks/${commitSha}/benchmarks/gmail-clone/2026-07-26-lmarena-model-a/`;
         const path = decodeURIComponent(url.slice(url.indexOf(marker) + marker.length));
@@ -65,13 +82,21 @@ describe("draft preview route graph", () => {
       return new Response("missing", { status: 404 });
     }));
 
-    const draftToken = signDraftToken({
-      version: 1, draftId, branch: `imports/1785072000-${draftId}`, commitSha,
+    const previewToken = signPreviewToken({
+      version: 1, draftId, branch, commitSha,
       task: "gmail-clone", appSlug: "2026-07-26-lmarena-model-a",
-      runId: "20260726T120000Z-model-a-lmarena", expiresAt: Date.now() + 60_000
+      nonce, expiresAt: Date.now() + 60_000
     }, secret);
-    const visual = await getDraftVisual(new Request(`https://hub.example/api/admin/imports/${draftId}/visual?token=${encodeURIComponent(draftToken)}`), { params: Promise.resolve({ draftId }) });
+    const visualUrl = `https://hub.example/api/admin/imports/${draftId}/visual?preview=${encodeURIComponent(previewToken)}`;
+    const visual = await getDraftVisual(new Request(visualUrl), { params: Promise.resolve({ draftId }) });
     expect(visual.status).toBe(200);
+    expect(visual.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(visual.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(visual.headers.get("cache-control")).toBe("no-store");
+    const csp = visual.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).not.toMatch(/\bhttps?:/);
     const html = await visual.text();
     const entryUrl = JSON.parse(html.match(/previewEntry\.src = ("[^"]+")/)![1]) as string;
     const capability = new URL(entryUrl, "https://hub.example").searchParams.get("preview")!;
@@ -80,7 +105,9 @@ describe("draft preview route graph", () => {
     const rootAsset = html.match(/src="([^"]+hero\.png[^"]*)"/)![1];
     expect(new URL(rootAsset, "https://hub.example").searchParams.getAll("preview")).toEqual([capability]);
     const rootAssetUrl = new URL(rootAsset, "https://hub.example");
-    expect((await getDraftAsset(new Request(rootAssetUrl), { params: Promise.resolve({ draftId, path: draftAssetPath(rootAssetUrl) }) })).status).toBe(200);
+    const rootAssetResponse = await getDraftAsset(new Request(rootAssetUrl), { params: Promise.resolve({ draftId, path: draftAssetPath(rootAssetUrl) }) });
+    expect(rootAssetResponse.status).toBe(200);
+    expectPrivateSubresourceHeaders(rootAssetResponse);
 
     const entry = await getDraftAsset(new Request(new URL(entryUrl, "https://hub.example")), { params: Promise.resolve({ draftId, path: ["src", "main.tsx"] }) });
     expect(entry.status).toBe(200);
@@ -111,6 +138,7 @@ describe("draft preview route graph", () => {
     const vendorUrlObject = new URL(vendorUrl, "https://hub.example");
     const vendor = await getDraftVendor(new Request(vendorUrlObject), { params: Promise.resolve({ draftId, path: draftVendorPath(vendorUrlObject) }) });
     expect(vendor.status).toBe(200);
+    expectPrivateSubresourceHeaders(vendor);
     const vendorBody = await vendor.text();
     expect(vendorBody).toContain("react@19.2.8");
     const transitive = vendorBody.match(/["']([^"']+react@19\.2\.8[^"']*)["']/)![1];
@@ -124,5 +152,15 @@ describe("draft preview route graph", () => {
     const duplicatedVendor = new URL(vendorUrlObject);
     duplicatedVendor.searchParams.append("preview", capability);
     expect((await getDraftVendor(new Request(duplicatedVendor), { params: Promise.resolve({ draftId, path: draftVendorPath(duplicatedVendor) }) })).status).toBe(404);
+
+    branchHead = "d".repeat(40);
+    expect((await getDraftVisual(new Request(visualUrl), { params: Promise.resolve({ draftId }) })).status).toBe(404);
+    expect((await getDraftAsset(new Request(new URL(entryUrl, "https://hub.example")), { params: Promise.resolve({ draftId, path: ["src", "main.tsx"] }) })).status).toBe(404);
+    expect((await getDraftVendor(new Request(vendorUrlObject), { params: Promise.resolve({ draftId, path: draftVendorPath(vendorUrlObject) }) })).status).toBe(404);
+
+    branchHead = null;
+    expect((await getDraftVisual(new Request(visualUrl), { params: Promise.resolve({ draftId }) })).status).toBe(404);
+    expect((await getDraftAsset(new Request(new URL(entryUrl, "https://hub.example")), { params: Promise.resolve({ draftId, path: ["src", "main.tsx"] }) })).status).toBe(404);
+    expect((await getDraftVendor(new Request(vendorUrlObject), { params: Promise.resolve({ draftId, path: draftVendorPath(vendorUrlObject) }) })).status).toBe(404);
   });
 });

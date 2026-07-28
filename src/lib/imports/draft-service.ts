@@ -7,8 +7,11 @@ import { isMelvynxTask } from "../tasks/catalog";
 import { importPathKey } from "./policy";
 import {
   createDraftId,
+  createPreviewNonce,
   IMPORT_TOKEN_TTL_MS,
+  PREVIEW_TOKEN_TTL_MS,
   signDraftToken,
+  signPreviewToken,
   signUploadToken,
   verifyDraftToken,
   verifyFileReceipt,
@@ -43,6 +46,10 @@ type ClockOptions = {
 
 type BeginDraftOptions = ClockOptions & {
   random?: Uint8Array;
+};
+
+type FinalizeDraftOptions = ClockOptions & {
+  previewRandom?: Uint8Array;
 };
 
 type NormalizedDraftMetadata = {
@@ -261,7 +268,7 @@ export async function finalizeDraft(
   input: FinalizeDraftInput,
   writer: BenchmarkGitWriter,
   secret: string,
-  options: ClockOptions = {}
+  options: FinalizeDraftOptions = {}
 ): Promise<{
   draftId: string;
   branch: string;
@@ -271,6 +278,7 @@ export async function finalizeDraft(
   runId: string;
   draftToken: string;
   previewUrl: string;
+  previewNonce: string;
 }> {
   const now = requiredNow(options.now ?? Date.now());
   const metadata = normalizeMetadata(input.metadata);
@@ -324,6 +332,17 @@ export async function finalizeDraft(
     runId: metadata.runId,
     expiresAt: Math.min(receiptAuthorityExpiresAt, now + IMPORT_TOKEN_TTL_MS)
   }, secret);
+  const previewNonce = createPreviewNonce(options.previewRandom ?? randomBytes(16));
+  const previewToken = signPreviewToken({
+    version: 1,
+    draftId: input.draftId,
+    branch,
+    commitSha,
+    task: metadata.task,
+    appSlug: metadata.appSlug,
+    nonce: previewNonce,
+    expiresAt: Math.min(receiptAuthorityExpiresAt, now + PREVIEW_TOKEN_TTL_MS)
+  }, secret);
   return {
     draftId: input.draftId,
     branch,
@@ -332,6 +351,7 @@ export async function finalizeDraft(
     appSlug: metadata.appSlug,
     runId: metadata.runId,
     draftToken,
-    previewUrl: `/api/admin/imports/${input.draftId}/visual?token=${encodeURIComponent(draftToken)}`
+    previewUrl: `/api/admin/imports/${input.draftId}/visual?preview=${encodeURIComponent(previewToken)}`,
+    previewNonce
   };
 }

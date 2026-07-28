@@ -2,7 +2,7 @@ import "server-only";
 
 import { getRunVisual } from "../../components/run-visual";
 import { SafeGitHubReader } from "../github/client";
-import { verifyDraftToken, type PreviewTokenBinding } from "../imports/receipts";
+import type { PreviewTokenBinding } from "../imports/receipts";
 import { benchmarkSources } from "../sources/config";
 import type { BenchmarkSource } from "../sources/types";
 import { getRunById } from "../storage/queries";
@@ -13,18 +13,6 @@ export type PreviewContext = {
   entryPath: string;
   source: BenchmarkSource;
   reader: SafeGitHubReader;
-};
-
-export type DraftPreviewContextInput = {
-  draftId: string;
-  token: string;
-  requestedPath?: string;
-};
-
-type DraftPreviewContextOptions = {
-  secret: string;
-  now?: number;
-  reader?: SafeGitHubReader;
 };
 
 function sourceForArtifact(source: BenchmarkSource, ref: string, artifactDirectory: string): BenchmarkSource {
@@ -48,24 +36,6 @@ export async function resolvePublicPreviewContext(
     entryPath: visual.path,
     source: sourceForArtifact(source, source.branch, artifactDirectory),
     reader
-  };
-}
-
-export async function resolveDraftPreviewContext(
-  input: DraftPreviewContextInput,
-  options: DraftPreviewContextOptions
-): Promise<PreviewContext> {
-  const payload = verifyDraftToken(input.token, options.secret, input.draftId, options.now);
-  if (!payload) throw new Error("Draft preview is not authorized");
-  const source = benchmarkSources.find((item) => item.id === "melvynx-benchmarks");
-  if (!source) throw new Error("Preview source is not available");
-  const artifactDirectory = `benchmarks/${payload.task}/${payload.appSlug}`;
-  return {
-    ref: payload.commitSha,
-    artifactDirectory,
-    entryPath: `${artifactDirectory}/index.html`,
-    source: sourceForArtifact(source, payload.commitSha, artifactDirectory),
-    reader: options.reader ?? new SafeGitHubReader()
   };
 }
 

@@ -77,7 +77,11 @@ export function createFinalizeImportHandler(
         environment.sessionSecret,
         { now: dependencies.now() }
       );
-      return json({ draftToken: result.draftToken, previewUrl: result.previewUrl });
+      return json({
+        draftToken: result.draftToken,
+        previewUrl: result.previewUrl,
+        previewNonce: result.previewNonce
+      });
     } catch {
       return json({ error: "Import invalide" }, 400);
     }

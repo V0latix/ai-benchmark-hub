@@ -1,6 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { JSDOM } from "jsdom";
+import { describe, expect, it, vi } from "vitest";
 
-import { getPreviewAssetUrl, getPreviewProxyUrl, injectInteractivePreview, injectPreviewBase, injectStandalonePreview, interactivePreviewCorsHeaders, interactivePreviewCsp, interactivePreviewSandbox } from "../../src/lib/visuals/preview";
+import {
+  adminPreviewMessageType,
+  getPreviewAssetUrl,
+  getPreviewProxyUrl,
+  injectInteractivePreview,
+  injectPreviewBase,
+  injectStandalonePreview,
+  interactivePreviewCorsHeaders,
+  interactivePreviewCsp,
+  interactivePreviewSandbox
+} from "../../src/lib/visuals/preview";
 
 describe("safe HTML previews", () => {
   it("uses an internal URL rather than framing raw GitHub content", () => {
@@ -38,5 +49,81 @@ describe("safe HTML previews", () => {
     expect(html).toContain("previewStorage");
     expect(html).not.toContain("src/main.tsx");
     expect(html).not.toContain("previewEntry");
+  });
+
+  it("proxies root and ordinary relative HTML assets while preserving query/hash and inert URLs", () => {
+    const html = injectStandalonePreview(
+      `<html><head>
+        <link href="./style.css?theme=dark#sheet">
+        <script src="assets/app.js"></script>
+      </head><body>
+        <img src="/hero.png?size=2#photo">
+        <a href="#details">Details</a>
+        <img src="data:image/png;base64,AA">
+        <img src="blob:https://hub.example/id">
+        <a href="mailto:test@example.com">Mail</a>
+        <script src="https://example.com/app.js"></script>
+        <img src="//example.com/image.png">
+      </body></html>`,
+      "/api/admin/imports/draft-1/visual/asset",
+      "v=tailwind-2&preview=short"
+    );
+
+    expect(html).toContain('href="/api/admin/imports/draft-1/visual/asset/style.css?theme=dark&v=tailwind-2&preview=short#sheet"');
+    expect(html).toContain('src="/api/admin/imports/draft-1/visual/asset/assets/app.js?v=tailwind-2&preview=short"');
+    expect(html).toContain('src="/api/admin/imports/draft-1/visual/asset/hero.png?size=2&v=tailwind-2&preview=short#photo"');
+    for (const untouched of [
+      'href="#details"',
+      'src="data:image/png;base64,AA"',
+      'src="blob:https://hub.example/id"',
+      'href="mailto:test@example.com"',
+      'src="https://example.com/app.js"',
+      'src="//example.com/image.png"'
+    ]) {
+      expect(html).toContain(untouched);
+    }
+  });
+
+  it("fails closed when a relative HTML URL escapes the artifact root", () => {
+    expect(() => injectStandalonePreview(
+      '<html><body><script src="../outside.js"></script></body></html>',
+      "/api/admin/imports/draft-1/visual/asset",
+      "preview=short"
+    )).toThrow(/outside|relative|root/i);
+  });
+
+  it("posts authenticated standalone readiness only after load and reports runtime errors", async () => {
+    const messages: unknown[] = [];
+    const html = injectStandalonePreview(
+      "<html><head></head><body><main>Ready</main></body></html>",
+      "/api/admin/imports/draft-1/visual/asset",
+      "preview=short",
+      { nonce: "cd".repeat(16) }
+    );
+    const dom = new JSDOM(html, {
+      runScripts: "dangerously",
+      url: "https://hub.example/api/admin/imports/draft-1/visual",
+      beforeParse(window) {
+        window.postMessage = vi.fn((message: unknown) => {
+          messages.push(message);
+        }) as typeof window.postMessage;
+      }
+    });
+
+    dom.window.dispatchEvent(new dom.window.Event("load"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(messages).toContainEqual({
+      type: adminPreviewMessageType,
+      state: "ready",
+      nonce: "cd".repeat(16)
+    });
+
+    dom.window.dispatchEvent(new dom.window.ErrorEvent("error", { message: "runtime failed" }));
+    expect(messages).toContainEqual({
+      type: adminPreviewMessageType,
+      state: "error",
+      nonce: "cd".repeat(16)
+    });
+    dom.window.close();
   });
 });

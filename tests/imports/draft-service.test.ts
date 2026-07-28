@@ -8,8 +8,10 @@ import {
 } from "../../src/lib/imports/draft-service";
 import {
   IMPORT_TOKEN_TTL_MS,
+  PREVIEW_TOKEN_TTL_MS,
   signFileReceipt,
   verifyDraftToken,
+  verifyPreviewToken,
   verifyUploadToken,
   type FileReceiptPayload
 } from "../../src/lib/imports/receipts";
@@ -68,7 +70,7 @@ describe("import draft service", () => {
       { metadata, receipts: [receipt()], draftId: DRAFT_ID },
       writer,
       SECRET,
-      { now: NOW }
+      { now: NOW, previewRandom: new Uint8Array(16).fill(0xcd) }
     );
 
     expect(result).toMatchObject({
@@ -77,7 +79,22 @@ describe("import draft service", () => {
       appSlug: "2026-07-26-lmarena-model-a",
       runId: "20260726T120000Z-model-a-lmarena"
     });
-    expect(result.previewUrl).toBe(`/api/admin/imports/${DRAFT_ID}/visual?token=${encodeURIComponent(result.draftToken)}`);
+    expect(result.previewNonce).toBe("cd".repeat(16));
+    const previewUrl = new URL(result.previewUrl, "https://hub.example");
+    const previewToken = previewUrl.searchParams.get("preview");
+    expect(previewUrl.pathname).toBe(`/api/admin/imports/${DRAFT_ID}/visual`);
+    expect([...previewUrl.searchParams.keys()]).toEqual(["preview"]);
+    expect(previewToken).not.toBe(result.draftToken);
+    expect(verifyPreviewToken(previewToken!, SECRET, {
+      draftId: DRAFT_ID,
+      branch: result.branch,
+      commitSha: result.commitSha,
+      task: "gmail-clone",
+      appSlug: "2026-07-26-lmarena-model-a",
+      nonce: result.previewNonce
+    }, NOW)).toMatchObject({
+      expiresAt: NOW + PREVIEW_TOKEN_TTL_MS
+    });
     expect(writer.createdTreeEntries).toEqual(expect.arrayContaining([
       expect.objectContaining({
         path: "benchmarks/gmail-clone/2026-07-26-lmarena-model-a/index.html",

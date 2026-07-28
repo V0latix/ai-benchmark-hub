@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   createDraftId,
+  PREVIEW_TOKEN_TTL_MS,
   signDraftToken,
   signFileReceipt,
+  signPreviewToken,
   signUploadToken,
   verifyDraftToken,
   verifyFileReceipt,
+  verifyPreviewToken,
   verifyUploadToken,
   type DraftTokenPayload,
   type FileReceiptPayload
@@ -90,6 +93,37 @@ describe("import receipts", () => {
       draftId: fileReceipt.draftId,
       expiresAt: Number.NaN
     }, SECRET)).toThrow(/upload/i);
+  });
+
+  it("uses a strict short-lived preview purpose bound to branch and a 128-bit nonce", () => {
+    const preview = {
+      version: 1 as const,
+      draftId: draftToken.draftId,
+      branch: draftToken.branch,
+      commitSha: draftToken.commitSha,
+      task: draftToken.task,
+      appSlug: draftToken.appSlug,
+      nonce: "cd".repeat(16),
+      expiresAt: NOW + PREVIEW_TOKEN_TTL_MS
+    };
+    const token = signPreviewToken(preview, SECRET);
+    const binding = {
+      draftId: preview.draftId,
+      branch: preview.branch,
+      commitSha: preview.commitSha,
+      task: preview.task,
+      appSlug: preview.appSlug,
+      nonce: preview.nonce
+    };
+
+    expect(verifyPreviewToken(token, SECRET, binding, NOW)).toEqual(preview);
+    expect(verifyDraftToken(token, SECRET, preview.draftId, NOW)).toBeNull();
+    expect(verifyPreviewToken(`${token}x`, SECRET, binding, NOW)).toBeNull();
+    expect(verifyPreviewToken(token, SECRET, { ...binding, branch: `imports/${Math.floor(NOW / 1_000)}-${"f".repeat(32)}` }, NOW)).toBeNull();
+    expect(verifyPreviewToken(token, SECRET, { ...binding, nonce: "ef".repeat(16) }, NOW)).toBeNull();
+    expect(verifyPreviewToken(token, SECRET, binding, preview.expiresAt)).toBeNull();
+    expect(() => signPreviewToken({ ...preview, nonce: "too-short" }, SECRET)).toThrow(/preview/i);
+    expect(() => signPreviewToken({ ...preview, unexpected: true } as typeof preview, SECRET)).toThrow(/preview/i);
   });
 
   it("creates a lowercase URL-safe draft identifier with at least 128 random bits", () => {
