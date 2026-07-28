@@ -140,8 +140,7 @@ function parseHtmlTag(tag: string): HtmlTag | null {
   return parsed;
 }
 
-function findRawTextEnd(html: string, name: string, start: number): number {
-  const lower = html.toLowerCase();
+function findRawTextEnd(html: string, lower: string, name: string, start: number): number {
   const needle = `</${name}`;
   let candidate = lower.indexOf(needle, start);
   while (candidate >= 0) {
@@ -156,9 +155,10 @@ function findRawTextEnd(html: string, name: string, start: number): number {
 }
 
 function transformHtmlTags(html: string, transform: (source: string, tag: HtmlTag) => string): string {
+  const lower = html.toLowerCase();
   let copied = 0;
   let cursor = 0;
-  let output = "";
+  const output: string[] = [];
   while (cursor < html.length) {
     const opening = html.indexOf("<", cursor);
     if (opening < 0) break;
@@ -185,14 +185,15 @@ function transformHtmlTags(html: string, transform: (source: string, tag: HtmlTa
     }
     const replacement = transform(source, tag);
     if (replacement !== source) {
-      output += html.slice(copied, opening) + replacement;
+      output.push(html.slice(copied, opening), replacement);
       copied = end;
     }
     cursor = ["script", "style", "textarea", "title"].includes(tag.name)
-      ? findRawTextEnd(html, tag.name, end)
+      ? findRawTextEnd(html, lower, tag.name, end)
       : end;
   }
-  return output + html.slice(copied);
+  output.push(html.slice(copied));
+  return output.join("");
 }
 
 function rewritePreviewReference(reference: string, assetBaseUrl: string, query?: string): string | null {
@@ -226,35 +227,46 @@ function rewritePreviewReference(reference: string, assetBaseUrl: string, query?
   return withPreviewQuery(`${assetBaseUrl.replace(/\/$/, "")}/${path}${suffix}`, query);
 }
 
+function replaceHtmlRanges(source: string, replacements: Array<{ range: [number, number]; value: string }>): string {
+  if (!replacements.length) return source;
+  const output: string[] = [];
+  let cursor = 0;
+  for (const replacement of replacements) {
+    output.push(source.slice(cursor, replacement.range[0]), replacement.value);
+    cursor = replacement.range[1];
+  }
+  output.push(source.slice(cursor));
+  return output.join("");
+}
+
+function quoteHtmlAttribute(value: string): string {
+  return `"${value.replaceAll("&", "&amp;").replaceAll("\"", "&quot;").replaceAll("<", "&lt;")}"`;
+}
+
 function rewritePreviewHtmlUrls(html: string, assetBaseUrl: string, query?: string): string {
   return transformHtmlTags(html, (source, tag) => {
     const replacements = tag.attributes.flatMap((attribute) => {
       if (
         (attribute.name !== "src" && attribute.name !== "href")
-        || !attribute.quoted
         || attribute.value === null
         || attribute.valueRange === undefined
       ) return [];
       const rewritten = rewritePreviewReference(attribute.value, assetBaseUrl, query);
-      return rewritten === null ? [] : [{ range: attribute.valueRange, value: rewritten }];
+      return rewritten === null
+        ? []
+        : [{ range: attribute.valueRange, value: attribute.quoted ? rewritten : quoteHtmlAttribute(rewritten) }];
     });
-    return replacements.sort((left, right) => right.range[0] - left.range[0]).reduce(
-      (current, replacement) => `${current.slice(0, replacement.range[0])}${replacement.value}${current.slice(replacement.range[1])}`,
-      source
-    );
+    return replaceHtmlRanges(source, replacements);
   });
 }
 
 const readHtmlAttribute = (tag: HtmlTag, name: string) => tag.attributes.find((attribute) => attribute.name === name);
 
 function withCredentialedCrossOrigin(source: string, tag: HtmlTag, before?: "src" | "href"): string {
-  const withoutCrossOrigin = tag.attributes
+  const removals = tag.attributes
     .filter((attribute) => attribute.name === "crossorigin")
-    .sort((left, right) => right.range[0] - left.range[0])
-    .reduce(
-      (current, attribute) => `${current.slice(0, attribute.range[0])}${current.slice(attribute.range[1])}`,
-      source
-    );
+    .map((attribute) => ({ range: attribute.range, value: "" }));
+  const withoutCrossOrigin = replaceHtmlRanges(source, removals);
   const reparsed = parseHtmlTag(withoutCrossOrigin);
   if (!reparsed) return source;
   const insertion = (before ? readHtmlAttribute(reparsed, before)?.range[0] : undefined) ?? reparsed.close;

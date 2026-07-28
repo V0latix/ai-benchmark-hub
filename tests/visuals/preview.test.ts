@@ -181,6 +181,58 @@ describe("safe HTML previews", () => {
     dom.window.close();
   });
 
+  it("safely quotes and proxies real unquoted admin module resource URLs", () => {
+    const html = injectStandalonePreview(
+      `<html><head>
+        <link REL=modulepreload HREF=./assets/chunk.js>
+        <link REL=stylesheet HREF=./assets/app.css>
+      </head><body>
+        <script TYPE=module SRC=./assets/app.js></script>
+      </body></html>`,
+      "/api/admin/imports/draft-1/visual/asset",
+      "v=tailwind-2&theme=dark",
+      { nonce: "cd".repeat(16) }
+    );
+    const dom = new JSDOM(html);
+    const external = dom.window.document.querySelector<HTMLScriptElement>('script[type="module"]');
+    const preload = dom.window.document.querySelector<HTMLLinkElement>('link[rel~="modulepreload"]');
+    const stylesheet = dom.window.document.querySelector<HTMLLinkElement>('link[rel~="stylesheet"]');
+    const openingTags = [...html.matchAll(/<(?:script|link)\b[^>]*>/gi)]
+      .map((match) => match[0])
+      .filter((tag) => /\b(?:SRC|HREF)=/i.test(tag));
+
+    expect(external?.getAttribute("src")).toBe("/api/admin/imports/draft-1/visual/asset/assets/app.js?v=tailwind-2&theme=dark");
+    expect(preload?.getAttribute("href")).toBe("/api/admin/imports/draft-1/visual/asset/assets/chunk.js?v=tailwind-2&theme=dark");
+    expect(stylesheet?.getAttribute("href")).toBe("/api/admin/imports/draft-1/visual/asset/assets/app.css?v=tailwind-2&theme=dark");
+    for (const element of [external, preload, stylesheet]) {
+      expect(element?.getAttribute("crossorigin")).toBe("use-credentials");
+    }
+    for (const tag of openingTags) {
+      const url = /\bSRC=/i.test(tag) ? tag.indexOf("SRC=") : tag.indexOf("HREF=");
+      expect(tag.indexOf('crossorigin="use-credentials"')).toBeLessThan(url);
+      expect(tag).toContain("&amp;theme=dark");
+    }
+    dom.window.close();
+  });
+
+  it("proxies valid unquoted public standalone URLs without adding credentials", () => {
+    const html = injectStandalonePreview(
+      `<html><head><link rel=modulepreload href=./assets/chunk.js></head><body>
+        <script type=module src=./assets/app.js></script>
+      </body></html>`,
+      "/api/runs/run-42/visual/asset"
+    );
+    const dom = new JSDOM(html);
+    const external = dom.window.document.querySelector<HTMLScriptElement>('script[type="module"]');
+    const preload = dom.window.document.querySelector<HTMLLinkElement>('link[rel~="modulepreload"]');
+
+    expect(external?.getAttribute("src")).toBe("/api/runs/run-42/visual/asset/assets/app.js");
+    expect(preload?.getAttribute("href")).toBe("/api/runs/run-42/visual/asset/assets/chunk.js");
+    expect(external?.hasAttribute("crossorigin")).toBe(false);
+    expect(preload?.hasAttribute("crossorigin")).toBe(false);
+    dom.window.close();
+  });
+
   it("ignores module attribute names embedded in unrelated tag values", () => {
     const html = injectStandalonePreview(
       `<html><head>
@@ -222,6 +274,39 @@ describe("safe HTML previews", () => {
     expect(moduleScript?.textContent).toContain(`const rawLink = ${JSON.stringify(rawLink)};`);
     dom.window.close();
   });
+
+  it("lowercases each large document at most once per scanner pass", () => {
+    const fixture = `<html><body>${'<script type=module>globalThis.__largeFixture = true;</script>'.repeat(20_000)}</body></html>`;
+    const originalLowerCase = String.prototype.toLowerCase;
+    let largeCalls = 0;
+    let cachedSource = "";
+    let cachedResult = "";
+    const lowerCase = vi.spyOn(String.prototype, "toLowerCase").mockImplementation(function (this: string) {
+      const source = String(this);
+      if (source.length >= fixture.length) {
+        largeCalls += 1;
+        if (source === cachedSource) return cachedResult;
+        cachedSource = source;
+        cachedResult = originalLowerCase.call(source);
+        return cachedResult;
+      }
+      return originalLowerCase.call(source);
+    });
+    let html = "";
+    try {
+      html = injectStandalonePreview(
+        fixture,
+        "/api/admin/imports/draft-1/visual/asset",
+        "v=tailwind-2",
+        { nonce: "cd".repeat(16) }
+      );
+    } finally {
+      lowerCase.mockRestore();
+    }
+
+    expect(largeCalls).toBeLessThanOrEqual(2);
+    expect(html.match(/crossorigin="use-credentials"/g)).toHaveLength(20_000);
+  }, 5_000);
 
   it("does not duplicate credentials already present on admin standalone module resources", () => {
     const html = injectStandalonePreview(
