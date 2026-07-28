@@ -187,7 +187,7 @@ export function injectInteractivePreview(
     rewritten = injectPreviewHeadBootstrap(rewritten, adminReadinessBootstrap(readiness, true));
   }
   const moduleLoader = readiness
-    ? `<script>const previewEntry = document.createElement("script"); previewEntry.type = "module"; previewEntry.src = ${JSON.stringify(entry)}; previewEntry.onload = () => globalThis.__benchmarkAdminPreview.entryReady(); previewEntry.onerror = () => globalThis.__benchmarkAdminPreview.fail(); document.body.append(previewEntry);</script>`
+    ? `<script>const previewEntry = document.createElement("script"); previewEntry.type = "module"; previewEntry.crossOrigin = "use-credentials"; previewEntry.src = ${JSON.stringify(entry)}; previewEntry.onload = () => globalThis.__benchmarkAdminPreview.entryReady(); previewEntry.onerror = () => globalThis.__benchmarkAdminPreview.fail(); document.body.append(previewEntry);</script>`
     : `<script>const previewEntry = document.createElement("script"); previewEntry.type = "module"; previewEntry.src = ${JSON.stringify(entry)}; previewEntry.onerror = () => { document.documentElement.dataset.previewError = "Entry module failed to load"; }; document.body.append(previewEntry);</script>`;
   return injectPreviewBootstrap(
     rewritten,

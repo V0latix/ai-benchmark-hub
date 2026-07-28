@@ -44,6 +44,23 @@ describe("safe HTML previews", () => {
     expect(getPreviewAssetUrl("run/42", "src/main.tsx")).toBe("/api/runs/run%2F42/visual/asset/src/main.tsx?preview=tailwind-2");
   });
 
+  it("sets credentialed CORS before the admin Vite entry URL without changing the opaque sandbox", () => {
+    const html = injectInteractivePreview(
+      '<html><body><script type="module" src="/src/main.tsx"></script></body></html>',
+      "/api/admin/imports/draft-1/visual/asset",
+      {},
+      "v=tailwind-2",
+      { nonce: "cd".repeat(16) }
+    );
+
+    const credentials = 'previewEntry.crossOrigin = "use-credentials"';
+    const source = 'previewEntry.src = "/api/admin/imports/draft-1/visual/asset/src/main.tsx?v=tailwind-2"';
+    expect(html).toContain(credentials);
+    expect(html).toContain(source);
+    expect(html.indexOf(credentials)).toBeLessThan(html.indexOf(source));
+    expect(interactivePreviewSandbox).toBe("allow-scripts");
+  });
+
   it("keeps standalone HTML modules and does not add a Vite entrypoint", () => {
     const html = injectStandalonePreview('<html><head></head><body><script type="module">import "three";</script></body></html>', "/api/runs/run-42/visual/asset");
     expect(html).toContain('import "three";');

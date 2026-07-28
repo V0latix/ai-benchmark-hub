@@ -7,7 +7,19 @@ import {
   type PreviewTokenPayload
 } from "../imports/receipts";
 
-export const adminPreviewCookieName = "benchmark_preview";
+export const adminPreviewCookieName = "__Secure-benchmark_preview";
+
+export function getAdminPreviewCorsHeaders(request: Request): Record<string, string> | null {
+  const origin = request.headers.get("origin");
+  if (origin !== null && origin !== "null") return null;
+  return origin === "null"
+    ? {
+        "Access-Control-Allow-Origin": "null",
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin"
+      }
+    : { "Vary": "Origin" };
+}
 
 export function adminPreviewCookiePath(draftId: string): string {
   if (!/^[a-f0-9]{32,}$/.test(draftId)) throw new Error("Invalid preview draft");
@@ -33,8 +45,7 @@ export function serializeAdminPreviewCookie(
   token: string,
   preview: PreviewTokenPayload,
   draftId: string,
-  now = Date.now(),
-  production = process.env.NODE_ENV === "production"
+  now = Date.now()
 ): string {
   if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) throw new Error("Invalid preview token");
   const secondsRemaining = Math.floor((preview.expiresAt - now) / 1_000);
@@ -45,8 +56,8 @@ export function serializeAdminPreviewCookie(
     `Max-Age=${maxAge}`,
     `Path=${adminPreviewCookiePath(draftId)}`,
     "HttpOnly",
-    "SameSite=Strict",
-    ...(production ? ["Secure"] : [])
+    "SameSite=None",
+    "Secure"
   ].join("; ");
 }
 

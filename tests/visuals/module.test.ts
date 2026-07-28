@@ -10,6 +10,25 @@ describe("preview module transform", () => {
     expect(code).not.toContain("import './index.css'");
   });
 
+  it("loads admin module stylesheets with credentials before assigning href", () => {
+    const code = transformPreviewModule(
+      "import './index.css'; export const ready = true;",
+      "src/App.ts",
+      "v=tailwind-2",
+      {
+        assetBaseUrl: "/api/admin/imports/draft-1/visual/asset",
+        dependencies: {},
+        credentialed: true
+      }
+    );
+
+    const credentials = 'previewStyle0.crossOrigin = "use-credentials"';
+    const source = 'previewStyle0.href = new URL("./index.css?v=tailwind-2", import.meta.url).href';
+    expect(code).toContain(credentials);
+    expect(code).toContain(source);
+    expect(code.indexOf(credentials)).toBeLessThan(code.indexOf(source));
+  });
+
   it("turns Vite static asset imports into URLs served by the preview proxy", () => {
     const code = transformPreviewModule("import hero from './assets/hero.png'; export const App = () => <img src={hero} />;", "src/App.tsx");
 

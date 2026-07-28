@@ -14,8 +14,8 @@ const branch = `imports/1785072000-${draftId}`;
 const nonce = "cd".repeat(16);
 const csrf = "preview-route-csrf";
 
-function withPreviewCookie(input: string | URL, cookie: string): Request {
-  return new Request(input, { headers: { cookie } });
+function withPreviewCookie(input: string | URL, cookie: string, origin?: string): Request {
+  return new Request(input, { headers: { cookie, ...(origin ? { origin } : {}) } });
 }
 
 function upstreamResponse(url: string, body: string): Response {
@@ -44,11 +44,10 @@ afterEach(() => {
 });
 
 describe("draft preview route graph", () => {
-  it("keeps preview authority in one strict HttpOnly cookie across HTML, assets, and pinned vendors", async () => {
+  it("keeps preview authority in one path-scoped HttpOnly cookie across HTML, assets, and pinned vendors", async () => {
     vi.stubEnv("ADMIN_PASSWORD_HASH", "scrypt$unused$unused");
     vi.stubEnv("ADMIN_SESSION_SECRET", secret);
     vi.stubEnv("BENCHMARK_GITHUB_TOKEN", "unused-test-token");
-    vi.stubEnv("NODE_ENV", "production");
 
     let branchHead: string | null = commitSha;
     const files = new Map([
@@ -111,11 +110,13 @@ describe("draft preview route graph", () => {
     expect(setup.status).toBe(204);
     expect(await setup.text()).toBe("");
     const setCookie = setup.headers.get("set-cookie") ?? "";
-    expect(setCookie).toContain("benchmark_preview=");
+    expect(setCookie).toContain("__Secure-benchmark_preview=");
     expect(setCookie).toContain(`Path=/api/admin/imports/${draftId}/visual`);
     expect(setCookie).toContain("HttpOnly");
-    expect(setCookie).toContain("SameSite=Strict");
+    expect(setCookie).toContain("SameSite=None");
     expect(setCookie).toContain("Secure");
+    expect(setCookie).not.toContain("Partitioned");
+    expect(setCookie).not.toMatch(/(?:^|;\s*)Domain=/i);
     const maxAge = Number(setCookie.match(/Max-Age=(\d+)/)?.[1]);
     expect(maxAge).toBeGreaterThan(0);
     expect(maxAge).toBeLessThanOrEqual(300);
@@ -145,8 +146,11 @@ describe("draft preview route graph", () => {
     expect(rootAssetResponse.status).toBe(200);
     expectPrivateSubresourceHeaders(rootAssetResponse);
 
-    const entry = await getDraftAsset(withPreviewCookie(new URL(entryUrl, "https://hub.example"), previewCookie), { params: Promise.resolve({ draftId, path: ["src", "main.tsx"] }) });
+    const entry = await getDraftAsset(withPreviewCookie(new URL(entryUrl, "https://hub.example"), previewCookie, "null"), { params: Promise.resolve({ draftId, path: ["src", "main.tsx"] }) });
     expect(entry.status).toBe(200);
+    expect(entry.headers.get("access-control-allow-origin")).toBe("null");
+    expect(entry.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(entry.headers.get("vary")).toContain("Origin");
     const moduleBody = await entry.text();
     const widgetSpecifier = moduleBody.match(/from\s+[\"']([^\"']+Widget[^\"']*)[\"']/)![1];
     const styleSpecifier = JSON.parse(moduleBody.match(/new URL\(("[^"]+style\.css[^"]*")/)![1]) as string;
@@ -154,11 +158,13 @@ describe("draft preview route graph", () => {
     const vendorUrl = moduleBody.match(/from\s+[\"']([^\"']+\/vendor\/react-dom[^\"']*)[\"']/)![1];
     expect(new URL(vendorUrl, "https://hub.example").searchParams.get("preview")).toBeNull();
     const widgetUrl = new URL(widgetSpecifier, new URL(entryUrl, "https://hub.example"));
-    const widget = await getDraftAsset(withPreviewCookie(widgetUrl, previewCookie), { params: Promise.resolve({ draftId, path: draftAssetPath(widgetUrl) }) });
+    const widget = await getDraftAsset(withPreviewCookie(widgetUrl, previewCookie, "null"), { params: Promise.resolve({ draftId, path: draftAssetPath(widgetUrl) }) });
     expect(widget.status).toBe(200);
     const styleUrl = new URL(styleSpecifier, new URL(entryUrl, "https://hub.example"));
-    const style = await getDraftAsset(withPreviewCookie(styleUrl, previewCookie), { params: Promise.resolve({ draftId, path: draftAssetPath(styleUrl) }) });
+    const style = await getDraftAsset(withPreviewCookie(styleUrl, previewCookie, "null"), { params: Promise.resolve({ draftId, path: draftAssetPath(styleUrl) }) });
     expect(style.status).toBe(200);
+    expect(style.headers.get("access-control-allow-origin")).toBe("null");
+    expect(style.headers.get("access-control-allow-credentials")).toBe("true");
     const styleBody = await style.text();
     const stylesheetUrls = [...styleBody.matchAll(/(?:url\(\s*|@import\s+)[\"']([^\"']+)/g)].map((match) => match[1]);
     const relativeAndRootUrls = stylesheetUrls.filter((url) => !url.startsWith("//") && !/^[a-z]+:/i.test(url));
@@ -174,15 +180,33 @@ describe("draft preview route graph", () => {
 
     const vendorUrlObject = new URL(vendorUrl, "https://hub.example");
     expect((await getDraftVendor(new Request(vendorUrlObject), { params: Promise.resolve({ draftId, path: draftVendorPath(vendorUrlObject) }) })).status).toBe(404);
-    const vendor = await getDraftVendor(withPreviewCookie(vendorUrlObject, previewCookie), { params: Promise.resolve({ draftId, path: draftVendorPath(vendorUrlObject) }) });
+    const vendor = await getDraftVendor(withPreviewCookie(vendorUrlObject, previewCookie, "null"), { params: Promise.resolve({ draftId, path: draftVendorPath(vendorUrlObject) }) });
     expect(vendor.status).toBe(200);
+    expect(vendor.headers.get("access-control-allow-origin")).toBe("null");
+    expect(vendor.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(vendor.headers.get("vary")).toContain("Origin");
     expectPrivateSubresourceHeaders(vendor);
     const vendorBody = await vendor.text();
     expect(vendorBody).toContain("react@19.2.8");
     const transitive = vendorBody.match(/["']([^"']+react@19\.2\.8[^"']*)["']/)![1];
     expect(new URL(transitive, "https://hub.example").searchParams.get("preview")).toBeNull();
     const transitiveUrl = new URL(transitive, "https://hub.example");
-    expect((await getDraftVendor(withPreviewCookie(transitiveUrl, previewCookie), { params: Promise.resolve({ draftId, path: draftVendorPath(transitiveUrl) }) })).status).toBe(200);
+    expect((await getDraftVendor(withPreviewCookie(transitiveUrl, previewCookie, "null"), { params: Promise.resolve({ draftId, path: draftVendorPath(transitiveUrl) }) })).status).toBe(200);
+
+    const foreignOriginEntry = await getDraftAsset(
+      withPreviewCookie(new URL(entryUrl, "https://hub.example"), previewCookie, "https://attacker.example"),
+      { params: Promise.resolve({ draftId, path: ["src", "main.tsx"] }) }
+    );
+    expect(foreignOriginEntry.status).toBe(404);
+    expect(foreignOriginEntry.headers.get("access-control-allow-origin")).toBeNull();
+    expect(foreignOriginEntry.headers.get("access-control-allow-credentials")).toBeNull();
+    const foreignOriginVendor = await getDraftVendor(
+      withPreviewCookie(vendorUrlObject, previewCookie, "https://attacker.example"),
+      { params: Promise.resolve({ draftId, path: draftVendorPath(vendorUrlObject) }) }
+    );
+    expect(foreignOriginVendor.status).toBe(404);
+    expect(foreignOriginVendor.headers.get("access-control-allow-origin")).toBeNull();
+    expect(foreignOriginVendor.headers.get("access-control-allow-credentials")).toBeNull();
 
     const queryCapabilityAsset = new URL(entryUrl, "https://hub.example");
     queryCapabilityAsset.searchParams.set("preview", previewToken);
@@ -206,7 +230,7 @@ describe("draft preview route graph", () => {
       task: "gmail-clone", appSlug: "2026-07-26-lmarena-model-a",
       nonce, expiresAt: Date.now() - 1
     }, secret);
-    const expiredCookie = `benchmark_preview=${expiredToken}`;
+    const expiredCookie = `__Secure-benchmark_preview=${expiredToken}`;
     expect((await getDraftVisual(withPreviewCookie(visualUrl, expiredCookie), { params: Promise.resolve({ draftId }) })).status).toBe(404);
   });
 });

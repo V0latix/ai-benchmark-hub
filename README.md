@@ -77,6 +77,17 @@ Draft branches are unlisted but technically public in the public
 `Melvynx/benchmarks` repository until they are canceled or published. Do not
 include private information in an archive.
 
+Admin previews remain in an opaque `sandbox="allow-scripts"` iframe. Their
+five-minute `__Secure-benchmark_preview` cookie is `HttpOnly`, `Secure`,
+`SameSite=None`, has no `Domain`, and is scoped to the exact draft visual path;
+the administrator session cookie remains `SameSite=Strict`. `SameSite=None`
+is required because browsers classify module requests from the opaque iframe
+as cross-site: Chrome testing confirmed that both `SameSite=Strict` and a
+top-level-set `Partitioned` cookie are withheld from that module graph.
+Credentialed preview CORS is therefore limited to the opaque `Origin: null`,
+while the CSP keeps `frame-ancestors 'self'` and no capability appears in a
+document or resource URL.
+
 Development and automated tests must use `InMemoryGitWriter`, which exercises
 the import and publication flow without publishing or making a real GitHub
 write. Run the relevant mocked tests before deployment:
