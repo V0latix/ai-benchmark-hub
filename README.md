@@ -29,6 +29,66 @@ pnpm dev
 Open [http://localhost:3000](http://localhost:3000). Public browsing requires
 no sign-in.
 
+## Configure private imports
+
+Only the administrator can add runs. Public visitors can still browse every
+task, run, visual, and comparison without an account.
+
+Generate the administrator password hash locally:
+
+```bash
+pnpm admin:hash-password
+```
+
+The command hides the password while it is entered, prints only its encoded
+scrypt hash, and never edits an environment file. Copy `.env.example` to a
+local environment file and replace all three deliberately invalid values:
+
+- `ADMIN_PASSWORD_HASH`: the complete output of the command above;
+- `ADMIN_SESSION_SECRET`: at least 32 random bytes from a password manager or
+  cryptographic generator;
+- `BENCHMARK_GITHUB_TOKEN`: a GitHub fine-grained personal access token.
+
+Never paste these values into an issue, log, chat, or test, and never commit
+them. On GitHub, create a fine-grained token restricted to the single
+`Melvynx/benchmarks` repository. Grant only repository permission
+**Contents: Read and write**. Do not grant account-wide or organization-wide
+access.
+
+In Vercel, add `ADMIN_PASSWORD_HASH`, `ADMIN_SESSION_SECRET`, and
+`BENCHMARK_GITHUB_TOKEN` to the intended project environments, then redeploy.
+Keep the public app readable without authentication; `/admin/import` and its
+mutation endpoints remain administrator-only.
+
+## Import LM Arena output
+
+Download the generated code from LM Arena as a ZIP, then open
+`/admin/import`. The wizard lets you choose an existing Melvynx task, enter the
+model name, inspect the archive, upload it to a draft, preview it in a sandbox,
+and explicitly publish it.
+
+Imports accept supported static projects and Vite React projects with their
+required entry files. Each ZIP is limited to 20 MB compressed, 75 MB expanded,
+1,000 files, and 3 MB per file. Traversal paths, symlinks, nested archives,
+secret-like files, source maps, executables, and unsupported binaries are
+rejected before upload.
+
+Draft branches are unlisted but technically public in the public
+`Melvynx/benchmarks` repository until they are canceled or published. Do not
+include private information in an archive.
+
+Development and automated tests must use `InMemoryGitWriter`, which exercises
+the import and publication flow without publishing or making a real GitHub
+write. Run the relevant mocked tests before deployment:
+
+```bash
+pnpm test -- tests/imports tests/components/admin-import-wizard.test.tsx
+```
+
+Exercise real publication only when explicitly intended, from a configured
+administrator session, with the repository-scoped token above. Never point a
+development or test writer at the real repository merely to verify the UI.
+
 ## Data loading
 
 The repository bundles a Melvynx snapshot for offline and development use. In

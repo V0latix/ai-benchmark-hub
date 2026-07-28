@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "admin:hash-password": "tsx scripts/hash-admin-password.ts",
     "sync": "tsx scripts/sync.ts"
   },
   "dependencies": {
