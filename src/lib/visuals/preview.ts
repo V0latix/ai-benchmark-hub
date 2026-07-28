@@ -1,3 +1,5 @@
+import { decodeHTMLAttribute } from "entities";
+
 function rawDirectoryUrl(repo: string, branch: string, filePath: string): string {
   const directory = filePath.split("/").slice(0, -1).map(encodeURIComponent).join("/");
   return `https://raw.githubusercontent.com/${repo}/${encodeURIComponent(branch)}/${directory}/`;
@@ -66,7 +68,7 @@ function injectPreviewHeadBootstrap(html: string, bootstrap: string): string {
 
 type HtmlAttribute = {
   name: string;
-  quoted: boolean;
+  quote: "\"" | "'" | null;
   range: [number, number];
   value: string | null;
   valueRange?: [number, number];
@@ -114,7 +116,7 @@ function parseHtmlTag(tag: string): HtmlTag | null {
     }
     const attribute: HtmlAttribute = {
       name: tag.slice(nameStart, cursor).toLowerCase(),
-      quoted: false,
+      quote: null,
       range: [rangeStart, cursor],
       value: null
     };
@@ -122,14 +124,18 @@ function parseHtmlTag(tag: string): HtmlTag | null {
     if (tag[cursor] === "=") {
       cursor += 1;
       while (isHtmlSpace(tag[cursor] ?? "")) cursor += 1;
-      const quote = tag[cursor] === "\"" || tag[cursor] === "'" ? tag[cursor] : "";
+      const quote: HtmlAttribute["quote"] = tag[cursor] === "\""
+        ? "\""
+        : tag[cursor] === "'"
+          ? "'"
+          : null;
       if (quote) cursor += 1;
       const valueStart = cursor;
       while (
         cursor < tag.length - 1
         && (quote ? tag[cursor] !== quote : !isHtmlSpace(tag[cursor] ?? "") && tag[cursor] !== ">")
       ) cursor += 1;
-      attribute.quoted = Boolean(quote);
+      attribute.quote = quote;
       attribute.value = tag.slice(valueStart, cursor);
       attribute.valueRange = [valueStart, cursor];
       if (quote && tag[cursor] === quote) cursor += 1;
@@ -239,8 +245,12 @@ function replaceHtmlRanges(source: string, replacements: Array<{ range: [number,
   return output.join("");
 }
 
-function quoteHtmlAttribute(value: string): string {
-  return `"${value.replaceAll("&", "&amp;").replaceAll("\"", "&quot;").replaceAll("<", "&lt;")}"`;
+function serializeHtmlAttribute(value: string, quote: HtmlAttribute["quote"]): string {
+  const escaped = value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(quote === "'" ? "'" : "\"", quote === "'" ? "&#39;" : "&quot;");
+  return quote === null ? `"${escaped}"` : escaped;
 }
 
 function rewritePreviewHtmlUrls(html: string, assetBaseUrl: string, query?: string): string {
@@ -251,10 +261,10 @@ function rewritePreviewHtmlUrls(html: string, assetBaseUrl: string, query?: stri
         || attribute.value === null
         || attribute.valueRange === undefined
       ) return [];
-      const rewritten = rewritePreviewReference(attribute.value, assetBaseUrl, query);
+      const rewritten = rewritePreviewReference(decodeHTMLAttribute(attribute.value), assetBaseUrl, query);
       return rewritten === null
         ? []
-        : [{ range: attribute.valueRange, value: attribute.quoted ? rewritten : quoteHtmlAttribute(rewritten) }];
+        : [{ range: attribute.valueRange, value: serializeHtmlAttribute(rewritten, attribute.quote) }];
     });
     return replaceHtmlRanges(source, replacements);
   });

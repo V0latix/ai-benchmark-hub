@@ -233,6 +233,83 @@ describe("safe HTML previews", () => {
     dom.window.close();
   });
 
+  it("matches browser attribute entity decoding exactly once for quoted and unquoted references", () => {
+    const cases = [
+      { id: "amp", lexical: "./assets/a&amp;b.js", decoded: "./assets/a&b.js" },
+      { id: "decimal", lexical: "./assets/d&#38;b.js", decoded: "./assets/d&b.js" },
+      { id: "hex", lexical: "./assets/h&#x26;b.js", decoded: "./assets/h&b.js" },
+      { id: "named", lexical: "./assets/n&frac12;b.js", decoded: "./assets/n½b.js" },
+      { id: "legacy", lexical: "./assets/l&copy-file.js", decoded: "./assets/l©-file.js" },
+      { id: "double", lexical: "./assets/double&amp;amp;b.js", decoded: "./assets/double&amp;b.js" },
+      { id: "legacy-blocked", lexical: "./assets/l&copy=b.js", decoded: "./assets/l&copy=b.js" }
+    ];
+    const source = `<html><body>${cases.map((item, index) => (
+      index % 2
+        ? `<script data-case=${item.id} type=module src=${item.lexical}></script>`
+        : `<script data-case="${item.id}" type="module" src="${item.lexical}"></script>`
+    )).join("")}</body></html>`;
+    const before = new JSDOM(source);
+    const html = injectStandalonePreview(
+      source,
+      "/api/admin/imports/draft-1/visual/asset",
+      "v=tailwind-2",
+      { nonce: "cd".repeat(16) }
+    );
+    const after = new JSDOM(html);
+
+    for (const item of cases) {
+      const original = before.window.document.querySelector<HTMLScriptElement>(`script[data-case="${item.id}"]`);
+      const rewritten = after.window.document.querySelector<HTMLScriptElement>(`script[data-case="${item.id}"]`);
+      expect(original?.getAttribute("src")).toBe(item.decoded);
+      expect(rewritten?.getAttribute("src")).toBe(
+        `/api/admin/imports/draft-1/visual/asset/${item.decoded.slice(2)}?v=tailwind-2`
+      );
+      expect(rewritten?.getAttribute("crossorigin")).toBe("use-credentials");
+    }
+    expect(
+      after.window.document.querySelector<HTMLScriptElement>('script[data-case="double"]')?.getAttribute("src")
+    ).not.toContain("double&b.js");
+    before.window.close();
+    after.window.close();
+  });
+
+  it("decodes entity slash, quote, query, and hash before guarding and safely serializing", () => {
+    const source = `<html><body>
+      <script type="module" src="./assets/folder&#47;file&#34;.js&#63;mode&#61;dark&#38;x&#61;1&#35;section"></script>
+    </body></html>`;
+    const before = new JSDOM(source);
+    const html = injectStandalonePreview(
+      source,
+      "/api/admin/imports/draft-1/visual/asset",
+      "v=tailwind-2",
+      { nonce: "cd".repeat(16) }
+    );
+    const after = new JSDOM(html);
+    const original = before.window.document.querySelector<HTMLScriptElement>('script[type="module"]');
+    const rewritten = after.window.document.querySelector<HTMLScriptElement>('script[type="module"]');
+
+    expect(original?.getAttribute("src")).toBe('./assets/folder/file".js?mode=dark&x=1#section');
+    expect(rewritten?.getAttribute("src")).toBe(
+      '/api/admin/imports/draft-1/visual/asset/assets/folder/file".js?mode=dark&x=1&v=tailwind-2#section'
+    );
+    expect(html).toContain("file&quot;.js?mode=dark&amp;x=1&amp;v=tailwind-2#section");
+    before.window.close();
+    after.window.close();
+  });
+
+  it.each([
+    "&#46;&#46;&#47;outside.js",
+    "assets&#47;&#46;&#46;&#47;outside.js",
+    "assets&#92;outside.js"
+  ])("rejects traversal after decoding the HTML reference %s", (reference) => {
+    expect(() => injectStandalonePreview(
+      `<html><body><script type="module" src="${reference}"></script></body></html>`,
+      "/api/admin/imports/draft-1/visual/asset",
+      "v=tailwind-2",
+      { nonce: "cd".repeat(16) }
+    )).toThrow(/outside|relative|root/i);
+  });
+
   it("ignores module attribute names embedded in unrelated tag values", () => {
     const html = injectStandalonePreview(
       `<html><head>
@@ -361,9 +438,9 @@ describe("safe HTML previews", () => {
       "v=tailwind-2"
     );
 
-    expect(html).toContain('href="/api/admin/imports/draft-1/visual/asset/style.css?theme=dark&v=tailwind-2#sheet"');
+    expect(html).toContain('href="/api/admin/imports/draft-1/visual/asset/style.css?theme=dark&amp;v=tailwind-2#sheet"');
     expect(html).toContain('src="/api/admin/imports/draft-1/visual/asset/assets/app.js?v=tailwind-2"');
-    expect(html).toContain('src="/api/admin/imports/draft-1/visual/asset/hero.png?size=2&v=tailwind-2#photo"');
+    expect(html).toContain('src="/api/admin/imports/draft-1/visual/asset/hero.png?size=2&amp;v=tailwind-2#photo"');
     for (const untouched of [
       'href="#details"',
       'src="data:image/png;base64,AA"',
