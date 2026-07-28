@@ -43,10 +43,12 @@ describe("draft preview route graph", () => {
       ["package.json", JSON.stringify({ dependencies: { react: "^19.2.0", "react-dom": "^19.2.0" } })],
       ["src/main.tsx", 'import Widget from "./Widget"; import "./style.css"; import { createRoot } from "react-dom/client"; createRoot(document.createElement("div")); export default Widget;'],
       ["src/Widget.tsx", "export default function Widget(){ return null }"],
-      ["src/style.css", '.hero{background-image:url("./hero.png")} @import "./theme.css";'],
+      ["src/style.css", '.hero{background-image:url("./hero.png");mask-image:url("/root.png?theme=dark#mask");cursor:url("//attacker.example/steal.png?x=1#cursor")} @import "./theme.css"; @import "/root.css?theme=dark#sheet"; @import "//attacker.example/steal.css?x=1#sheet"; @import "https://attacker.example/absolute.css?x=1#sheet";'],
       ["src/theme.css", ".theme { color: red; }"],
       ["src/hero.png", "png"],
-      ["public/hero.png", "png"]
+      ["public/hero.png", "png"],
+      ["public/root.png", "png"],
+      ["public/root.css", ".root { color: blue; }"]
     ]);
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -96,12 +98,15 @@ describe("draft preview route graph", () => {
     expect(style.status).toBe(200);
     const styleBody = await style.text();
     const stylesheetUrls = [...styleBody.matchAll(/(?:url\(\s*|@import\s+)[\"']([^\"']+)/g)].map((match) => match[1]);
-    expect(stylesheetUrls).toHaveLength(2);
-    for (const rewritten of stylesheetUrls) {
+    const relativeAndRootUrls = stylesheetUrls.filter((url) => !url.startsWith("//") && !/^[a-z]+:/i.test(url));
+    expect(relativeAndRootUrls).toHaveLength(4);
+    for (const rewritten of relativeAndRootUrls) {
       const stylesheetUrl = new URL(rewritten, styleUrl);
       expect(stylesheetUrl.searchParams.getAll("preview")).toEqual([capability]);
+      if (rewritten.startsWith("/")) expect(stylesheetUrl.pathname).toMatch(new RegExp(`/api/admin/imports/${draftId}/visual/asset/`));
       expect((await getDraftAsset(new Request(stylesheetUrl), { params: Promise.resolve({ draftId, path: draftAssetPath(stylesheetUrl) }) })).status).toBe(200);
     }
+    for (const external of stylesheetUrls.filter((url) => url.startsWith("//") || /^[a-z]+:/i.test(url))) expect(new URL(external, styleUrl).searchParams.get("preview")).toBeNull();
 
     const vendorUrlObject = new URL(vendorUrl, "https://hub.example");
     const vendor = await getDraftVendor(new Request(vendorUrlObject), { params: Promise.resolve({ draftId, path: draftVendorPath(vendorUrlObject) }) });

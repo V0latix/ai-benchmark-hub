@@ -21,6 +21,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ draf
     const preview = verifyPreviewTokenForDraft(token, secret, draftId);
     if (!preview) throw new Error("unauthorized");
     const context = resolveVerifiedDraftPreviewContext(preview);
+    const assetBaseUrl = `/api/admin/imports/${encodeURIComponent(draftId)}/visual/asset`;
     for (const candidate of candidates(requested)) for (const filePath of [`${context.artifactDirectory}/${candidate}`, `${context.artifactDirectory}/public/${candidate}`]) {
       try {
         const isModule = /\.[cm]?[jt]sx?$/i.test(filePath), css = filePath.endsWith(".css");
@@ -28,10 +29,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ draf
         const text = await context.reader.readText(context.source, filePath);
         const manifest = isModule ? JSON.parse(await context.reader.readText(context.source, `${context.artifactDirectory}/package.json`)) as { dependencies?: Record<string, string> } : null;
         const body = isModule
-          ? transformPreviewModule(text, filePath, previewQuery, { assetBaseUrl: `/api/admin/imports/${encodeURIComponent(draftId)}/visual/asset`, dependencies: manifest?.dependencies ?? {} })
+          ? transformPreviewModule(text, filePath, previewQuery, { assetBaseUrl, dependencies: manifest?.dependencies ?? {} })
           : css && /@import\s+["']tailwindcss["']/i.test(text)
-            ? await compilePreviewStylesheet(text, extractTailwindCandidates((await Promise.all((await context.reader.listFiles(context.source)).filter((item) => /\.[cm]?[jt]sx?$/i.test(item)).map((item) => context.reader.readText(context.source, item).catch(() => "")))).join("\n")), previewQuery)
-            : transformPreviewStylesheet(text, previewQuery);
+            ? await compilePreviewStylesheet(text, extractTailwindCandidates((await Promise.all((await context.reader.listFiles(context.source)).filter((item) => /\.[cm]?[jt]sx?$/i.test(item)).map((item) => context.reader.readText(context.source, item).catch(() => "")))).join("\n")), { query: previewQuery, assetBaseUrl })
+            : transformPreviewStylesheet(text, { query: previewQuery, assetBaseUrl });
         return new Response(body, { headers: { "Content-Type": getPreviewAssetContentType(isModule ? "module.js" : filePath), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...interactivePreviewCorsHeaders } });
       } catch { /* safe candidate fallback */ }
     }

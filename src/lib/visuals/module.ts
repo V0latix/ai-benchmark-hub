@@ -30,6 +30,11 @@ type PreviewModuleVendorContext = {
   dependencies: Record<string, string>;
 };
 
+export type PreviewStylesheetContext = {
+  query?: string;
+  assetBaseUrl?: string;
+};
+
 function rewriteBareModuleSpecifiers(source: string, query: string | undefined, vendor?: PreviewModuleVendorContext): string {
   if (!query || !vendor) return source;
   return source.replace(/(\b(?:from|import)\s*(?:\(\s*)?)(["'])([^"']+)\2/g, (match, prefix, quote, specifier: string) => {
@@ -56,12 +61,18 @@ export function transformPreviewModule(source: string, path: string, query?: str
   return `${styleLoader}\n${assetLoader}\n${transformed}`;
 }
 
-export function transformPreviewStylesheet(source: string, query?: string): string {
+function rewriteStylesheetReference(reference: string, context: PreviewStylesheetContext): string {
+  if (!context.query || reference.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(reference)) return reference;
+  if (reference.startsWith("/") && context.assetBaseUrl) return withPreviewQuery(`${context.assetBaseUrl.replace(/\/$/, "")}${reference}`, context.query);
+  if (reference.startsWith("./") || reference.startsWith("../")) return withPreviewQuery(reference, context.query);
+  return reference;
+}
+
+export function transformPreviewStylesheet(source: string, context: PreviewStylesheetContext = {}): string {
   const withoutTailwind = source.replace(/@import\s+["']tailwindcss["'];?\s*/g, "");
-  if (!query) return withoutTailwind;
   return withoutTailwind
-    .replace(/(@import\s+)(["'])((?:\.{1,2}\/|\/)[^"']+)\2/g, (_match, prefix, quote, url) => `${prefix}${quote}${withPreviewQuery(url, query)}${quote}`)
-    .replace(/(url\(\s*)(["']?)((?:\.{1,2}\/|\/)[^"')]+)\2(\s*\))/g, (_match, prefix, quote, url, suffix) => `${prefix}${quote}${withPreviewQuery(url, query)}${quote}${suffix}`);
+    .replace(/(@import\s+)(["'])([^"']+)\2/g, (_match, prefix, quote, url) => `${prefix}${quote}${rewriteStylesheetReference(url, context)}${quote}`)
+    .replace(/(url\(\s*)(["']?)([^"')]+)\2(\s*\))/g, (_match, prefix, quote, url, suffix) => `${prefix}${quote}${rewriteStylesheetReference(url, context)}${quote}${suffix}`);
 }
 
 export function extractTailwindCandidates(source: string): string[] {
@@ -70,8 +81,8 @@ export function extractTailwindCandidates(source: string): string[] {
   return [...candidates];
 }
 
-export async function compilePreviewStylesheet(source: string, candidates: string[], query?: string): Promise<string> {
+export async function compilePreviewStylesheet(source: string, candidates: string[], context?: PreviewStylesheetContext): Promise<string> {
   const tailwindStylesheet = await readFile(require.resolve("tailwindcss/index.css"), "utf8");
   const compiler = await compile(source.replace(tailwindPlugin, ""), { loadStylesheet: async (id) => ({ path: id, base: "", content: id === "tailwindcss" ? tailwindStylesheet : "" }) });
-  return transformPreviewStylesheet(compiler.build(candidates), query);
+  return transformPreviewStylesheet(compiler.build(candidates), context);
 }
