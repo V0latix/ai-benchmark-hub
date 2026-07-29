@@ -5,7 +5,7 @@ import { strToU8, zipSync } from "fflate";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AdminImportWizard } from "../../src/components/admin-import-wizard";
-import { adminPreviewMessageType } from "../../src/lib/visuals/preview";
+import { adminPreviewInitMessageType, adminPreviewMessageType } from "../../src/lib/visuals/preview";
 
 const csrf = "csrf-value";
 const tasks = ["figma-clone", "gmail-clone"];
@@ -103,9 +103,33 @@ function postPreviewMessage(
 }
 
 function markPreviewReady(iframe: HTMLIFrameElement) {
+  const frameWindow = iframe.contentWindow;
+  expect(frameWindow).not.toBeNull();
+  const postMessage = vi.spyOn(frameWindow!, "postMessage");
+
   fireEvent.load(iframe);
-  postPreviewMessage(iframe, "ready", previewNonce, iframe.contentWindow, 1);
-  postPreviewMessage(iframe, "ready", previewNonce, iframe.contentWindow, 2);
+
+  let initMessage: { generation: number } | undefined;
+  for (const [message] of postMessage.mock.calls) {
+    if (
+      typeof message === "object"
+      && message !== null
+      && "type" in message
+      && message.type === adminPreviewInitMessageType
+    ) {
+      initMessage = message as { generation: number };
+    }
+  }
+  postMessage.mockRestore();
+
+  expect(initMessage).toBeDefined();
+  postPreviewMessage(
+    iframe,
+    "ready",
+    previewNonce,
+    frameWindow,
+    initMessage!.generation
+  );
 }
 
 afterEach(() => {
@@ -404,6 +428,9 @@ describe("AdminImportWizard", () => {
     await identifyRun();
     fireEvent.click(screen.getByRole("button", { name: "Créer la prévisualisation" }));
     const preview = await screen.findByTitle("Prévisualisation du run importé");
+    fireEvent.load(preview);
+    fireEvent.load(preview);
+    fireEvent.load(preview);
     markPreviewReady(preview as HTMLIFrameElement);
     fireEvent.click(screen.getByRole("button", { name: "Publier le run" }));
 

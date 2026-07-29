@@ -1,6 +1,8 @@
 node_modules
+.pnpm-store
 .next
 .cache
+.DS_Store
 .env*
 !.env.example
 coverage
