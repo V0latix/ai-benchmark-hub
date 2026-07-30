@@ -143,6 +143,47 @@ describe("TaskRunBrowser", () => {
     expect(screen.getByRole("button", { name: /run run-b$/i })).toBeInTheDocument();
   });
 
+  it("shows each run effort and updates the active effort summary", () => {
+    const xhigh = makeRun("run-xhigh", "gpt-5.6-sol", {
+      raw: { effort: "xhigh" }
+    });
+    const ultra = makeRun("run-ultra", "gpt-5.6-sol", {
+      raw: { effort: " ultra " }
+    });
+
+    render(
+      <TaskRunBrowser
+        initialRunId="run-xhigh"
+        prompt={null}
+        runs={[xhigh, ultra]}
+        task="gmail-clone"
+      />
+    );
+
+    expect(screen.getByText("Effort · xhigh")).toBeInTheDocument();
+    expect(screen.getByText("Effort · ultra")).toBeInTheDocument();
+
+    const effortDefinition = screen.getByText("Effort", { selector: "dt" }).closest("div");
+    expect(effortDefinition).toHaveTextContent("xhigh");
+
+    fireEvent.click(screen.getByRole("button", { name: /run run-ultra$/i }));
+    expect(effortDefinition).toHaveTextContent("ultra");
+  });
+
+  it("omits malformed effort badges and keeps the active fallback explicit", () => {
+    render(
+      <TaskRunBrowser
+        initialRunId="run-invalid"
+        prompt={null}
+        runs={[makeRun("run-invalid", "model-a", { raw: { effort: 42 } })]}
+        task="gmail-clone"
+      />
+    );
+
+    expect(screen.queryByText(/Effort ·/)).not.toBeInTheDocument();
+    expect(screen.getByText("Effort", { selector: "dt" }).closest("div")).toHaveTextContent("—");
+  });
+
   it("keeps an ambiguous run visible but disables its preview and detail link", () => {
     const ambiguous = makeRun("shared-run", "model-a");
     render(

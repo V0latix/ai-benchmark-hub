@@ -15,6 +15,12 @@ function formattedDate(value: string | null) {
     : new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeZone: "UTC" }).format(date);
 }
 
+function runEffort(run: NormalizedRun): string | null {
+  if (!run.raw || typeof run.raw !== "object" || Array.isArray(run.raw)) return null;
+  const effort = (run.raw as { effort?: unknown }).effort;
+  return typeof effort === "string" && effort.trim() ? effort.trim() : null;
+}
+
 function runMetadataLabel(run: NormalizedRun) {
   return [run.harness, formattedDate(run.createdAt) === "—" ? null : formattedDate(run.createdAt), `#${run.id.slice(-8)}`]
     .filter(Boolean)
@@ -51,6 +57,7 @@ export function TaskRunBrowser({
   }
 
   const activeRunIsUnresolvable = unresolvableRunIds.includes(activeRun.id);
+  const activeEffort = runEffort(activeRun);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
@@ -71,10 +78,11 @@ export function TaskRunBrowser({
           <ul className="flex gap-2 overflow-x-auto pb-1 lg:flex-col">
             {runs.map((run) => {
               const selected = run.id === activeRun.id;
+              const effort = runEffort(run);
               return (
                 <li className="shrink-0 lg:w-full" key={`${run.task}:${run.id}`}>
                   <button
-                    aria-label={`${run.model ?? "Modèle inconnu"}; ${runMetadataLabel(run)}; run ${run.id}`}
+                    aria-label={`${run.model ?? "Modèle inconnu"}; ${runMetadataLabel(run)}; effort ${effort ?? "inconnu"}; run ${run.id}`}
                     aria-pressed={selected}
                     className={`min-w-56 rounded-xl border px-3 py-3 text-left text-sm transition lg:w-full lg:min-w-0 ${
                       selected
@@ -84,7 +92,14 @@ export function TaskRunBrowser({
                     onClick={() => setActiveRunId(run.id)}
                     type="button"
                   >
-                    <span className="block truncate font-medium">{run.model ?? "Modèle inconnu"}</span>
+                    <span className="flex min-w-0 items-center justify-between gap-2">
+                      <span className="min-w-0 truncate font-medium">{run.model ?? "Modèle inconnu"}</span>
+                      {effort && (
+                        <span className="max-w-28 shrink-0 truncate rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2 py-0.5 text-[0.65rem] font-semibold text-cyan-100">
+                          Effort · {effort}
+                        </span>
+                      )}
+                    </span>
                     <span className="mt-1 block truncate text-xs opacity-80">{runMetadataLabel(run)}</span>
                     {unresolvableRunIds.includes(run.id) && (
                       <span className="mt-1 block text-xs text-amber-200">Aperçu et détail indisponibles</span>
@@ -121,7 +136,7 @@ export function TaskRunBrowser({
           <RunVisual branch={branchFor(activeRun)} run={activeRun} />
         )}
         <div className="mt-4 flex flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:flex-row sm:items-end sm:justify-between">
-          <dl className="grid min-w-0 flex-1 grid-cols-2 gap-4 sm:grid-cols-3">
+          <dl className="grid min-w-0 flex-1 grid-cols-2 gap-4 sm:grid-cols-4">
             <div className="min-w-0">
               <dt className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Modèle</dt>
               <dd className="mt-1 truncate font-medium text-[var(--text-primary)]">{activeRun.model ?? "—"}</dd>
@@ -133,6 +148,10 @@ export function TaskRunBrowser({
             <div className="min-w-0">
               <dt className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Publication</dt>
               <dd className="mt-1 truncate font-medium text-[var(--text-primary)]">{formattedDate(activeRun.createdAt)}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Effort</dt>
+              <dd className="mt-1 truncate font-medium text-[var(--text-primary)]">{activeEffort ?? "—"}</dd>
             </div>
           </dl>
           {activeRunIsUnresolvable ? (
